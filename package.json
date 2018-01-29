@@ -1,0 +1,32 @@
+{
+  "name": "rockpaperscissors",
+  "version": "1.0.0",
+  "description": "RockPaperScissors Smart Contract - B9Lab Course Practice",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "truffle test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/canepat/b9lab-rockpaperscissors.git"
+  },
+  "keywords": [
+    "b9lab",
+    "academy",
+    "solidity",
+    "smartcontract"
+  ],
+  "author": "Tullio Canepa",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/canepat/b9lab-rockpaperscissors/issues"
+  },
+  "homepage": "https://github.com/canepat/b9lab-rockpaperscissors#readme",
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "bluebird-retry": "^0.11.0"
+  }
+}
