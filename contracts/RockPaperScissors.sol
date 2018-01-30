@@ -67,7 +67,7 @@ contract RockPaperScissors {
             bet2.player = msg.sender;
         }
 
-        LogEnrol(msg.sender, bet1.player == 0 ? 1 : 2);
+        LogEnrol(msg.sender, bet1.player == msg.sender ? 1 : 2);
     }
 
     function canPlay(address player) public constant returns (bool gamePlayable) {
