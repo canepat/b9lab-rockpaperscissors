@@ -34,6 +34,11 @@ contract('RockPaperScissors', function(accounts) {
     const GETH_SLOW_DURATION = 15000;
     const GAME_PRICE = web3.toWei(0.009, 'ether');
     const GAME_TIMEOUT = 2;
+    const ROCK = 0;
+    const PAPER = 1;
+    const SCISSORS = 2;
+    const PLAYER1_SECRET = "secret1";
+    const PLAYER2_SECRET = "secret2";
 
     let isTestRPC, isGeth, slowDuration;
     before("should identify node", function() {
@@ -142,7 +147,7 @@ contract('RockPaperScissors', function(accounts) {
     });
 
     describe("#enrol()", function() {
-        it("should fail if players are already registered", function() {
+        it("should fail if two players are already registered", function() {
             this.slow(slowDuration);
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
@@ -151,6 +156,19 @@ contract('RockPaperScissors', function(accounts) {
                     return web3.eth.expectedExceptionPromise(
                         function() {
                             return instance.enrol({ from: player3, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if player is already registered", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(function() {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE });
                         },
                         MAX_GAS
                     );
@@ -176,22 +194,40 @@ contract('RockPaperScissors', function(accounts) {
                 MAX_GAS
             );
         });
-        it("should register enrolled players", function() {
+        it("should register the first player", function() {
             this.slow(slowDuration);
 
             return web3.eth.expectedOkPromise(
                 function() {
-                    return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                        .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }));
+                    return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 },
                 MAX_GAS
             )
             .then(() => instance.bet1())
             .then(bet1 => {
                 assert.strictEqual(bet1[0], player1, "player1 not returned");
-                return instance.bet2();
+                return instance.canPlay(player1);
             })
-            .then(bet2 => assert.strictEqual(bet2[0], player2, "player2 not returned"));
+            .then(canPlayer1Play => assert.isTrue(canPlayer1Play, "player1 cannot play"));
+        });
+        it("should register the second player", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(function() {
+                    return web3.eth.expectedOkPromise(
+                        function() {
+                            return instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    )
+                    .then(() => instance.bet2())
+                    .then(bet2 => {
+                        assert.strictEqual(bet2[0], player2, "player2 not returned");
+                        return instance.canPlay(player2);
+                    })
+                    .then(canPlayer2Play => assert.isTrue(canPlayer2Play, "player2 cannot play"));
+                });
         });
         it("should have emitted LogEnrol event", function() {
             this.slow(slowDuration);
@@ -218,6 +254,111 @@ contract('RockPaperScissors', function(accounts) {
 
                     const receiptLogEvent = instance.LogEnrol().formatter(receiptRawLogEvent);
                     assert.deepEqual(receiptLogEvent, txLogEvent, "LogEnrol receipt event is different from tx event");
+                });
+        });
+    });
+
+    describe("#play()", function() {
+        it("should fail if sender cannot play", function() {
+            this.slow(slowDuration);
+
+            let moveHash;
+            return instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_moveHash => {
+                    moveHash = _moveHash;
+
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.play(moveHash, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should store the first player's bet", function() {
+            this.slow(slowDuration);
+
+            let moveHash;
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(_moveHash => {
+                    moveHash = _moveHash;
+                    
+                    return web3.eth.expectedOkPromise(
+                        function() {
+                            return instance.play(moveHash, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    )
+                    .then(() => instance.bet1())
+                    .then(bet1 => {
+                        assert.strictEqual(bet1[0], player1, "player1 not stored");
+                        assert.isTrue(bet1[1], "player1 has not played");
+                        assert.strictEqual(bet1[2], moveHash, "player1 moveHash not stored");
+                    });
+                });
+        });
+        it("should store the second player's bet", function() {
+            this.slow(slowDuration);
+            
+            let moveHash;
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(move2Hash => {
+                    moveHash = move2Hash;
+                    
+                    return web3.eth.expectedOkPromise(
+                        function() {
+                            return instance.play(moveHash, { from: player2, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    )
+                    .then(() => instance.bet2())
+                    .then(bet2 => {
+                        assert.strictEqual(bet2[0], player2, "player2 not stored");
+                        assert.isTrue(bet2[1], "player2 has not played");
+                        assert.strictEqual(bet2[2], moveHash, "player2 moveHash not stored");
+                    })
+                    .then(() => instance.canReveal(player1))
+                    .then(canPlayer1Reveal => {
+                        assert.isTrue(canPlayer1Reveal, "player1 cannot reveal");
+                        return instance.canReveal(player2);
+                    })
+                    .then(canPlayer2Reveal => assert.isTrue(canPlayer2Reveal, "player2 cannot reveal"));
+                });
+        });
+        it("should have emitted LogPlay event", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
+                .then(txObj => {
+                    assert.isAtMost(txObj.logs.length, txObj.receipt.logs.length);
+                    assert.equal(txObj.logs.length, 1); // just 1 LogPlay event
+                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogPlay event
+
+                    const EXPECTED_ARG_LENGTH = 2;
+                    const txLogEvent = txObj.logs[0];
+                    const eventName = txLogEvent.event;
+                    const callerArg = txLogEvent.args.caller;
+                    const betIdArg = txLogEvent.args.betId;
+                    assert.equal(eventName, "LogPlay", "LogPlay event name is wrong");
+                    assert.equal(callerArg, player1, "LogPlay arg caller is wrong: " + callerArg);
+                    assert.equal(betIdArg, 1, "LogPlay arg betId is wrong: " + betIdArg);
+
+                    const EXPECTED_TOPIC_LENGTH = 3;
+                    const receiptRawLogEvent = txObj.receipt.logs[0];
+                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogPlay(address,uint256)"));
+                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
+
+                    const receiptLogEvent = instance.LogPlay().formatter(receiptRawLogEvent);
+                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogPlay receipt event is different from tx event");
                 });
         });
     });

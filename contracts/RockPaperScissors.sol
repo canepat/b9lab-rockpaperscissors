@@ -53,7 +53,7 @@ contract RockPaperScissors {
     }
     
     function canEnrol() public constant returns (bool gameOpen) {
-        return bet1.player == 0 || bet2.player == 0;
+        return bet1.player == 0 && bet2.player != msg.sender || bet1.player != msg.sender && bet2.player == 0;
     }
 
     function enrol() public payable {
