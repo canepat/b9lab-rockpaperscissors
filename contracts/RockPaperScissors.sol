@@ -27,6 +27,7 @@ contract RockPaperScissors {
     uint256 public firstRevealBlock;
     GameBet public bet1;
     GameBet public bet2;
+    uint256 public winnerId;
     mapping (int256 => mapping (int256 => uint256)) rpsRules;
 
     function RockPaperScissors(uint256 _gamePrice, uint256 _gameTimeoutBlocks) {
@@ -102,15 +103,20 @@ contract RockPaperScissors {
         LogReveal(msg.sender, int256(move));
     }
 
-    function isGameOver() returns (bool gameOver) {
-        // Both moves revealed OR reveal timeout in blocks expired.
-        return bet1.move != INVALID_MOVE && bet2.move != INVALID_MOVE || block.number > firstRevealBlock + gameTimeoutBlocks;
+    function bothMovesRevealed() public constant returns (bool movesRevealed) {
+        return bet1.move != INVALID_MOVE && bet2.move != INVALID_MOVE;
+    }
+
+    function timeoutExpired() public constant returns (bool timedOut) {
+        return (block.number > firstRevealBlock + gameTimeoutBlocks) && (bet1.move != INVALID_MOVE || bet2.move != INVALID_MOVE);
+    }
+
+    function isGameOver() public constant returns (bool gameOver) {
+        return bothMovesRevealed() || timeoutExpired();
     }
 
     function chooseWinner() public returns (uint256 winnerIndex) {
         require(isGameOver());
-
-        uint256 winnerId;
 
         if (bet1.move != INVALID_MOVE) {
             if (bet2.move != INVALID_MOVE) {
