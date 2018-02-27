@@ -4,10 +4,11 @@ contract RockPaperScissors {
     event LogCreation(address indexed owner, uint256 indexed gamePrice, uint256 indexed gameTimeoutBlocks);
     event LogEnrol(address indexed caller, uint256 indexed betId);
     event LogPlay(address indexed caller, uint256 indexed betId);
-    event LogReveal(address indexed caller, int256 indexed move);
+    event LogReveal(address indexed caller, uint256 indexed move);
     event LogChooseWinner(address indexed caller, uint256 indexed winnerId);
 
     enum GameMove {
+        VOID,
         ROCK,
         PAPER,
         SCISSORS
@@ -15,12 +16,9 @@ contract RockPaperScissors {
 
     struct GameBet {
         address player;
-        bool played;
         bytes32 moveHash;
-        int256 move;
+        GameMove move;
     }
-
-    int256 public constant INVALID_MOVE = -1;
 
     uint256 public gamePrice;
     uint256 public gameTimeoutBlocks;
@@ -28,7 +26,7 @@ contract RockPaperScissors {
     GameBet public bet1;
     GameBet public bet2;
     uint256 public winnerId;
-    mapping (int256 => mapping (int256 => uint256)) rpsRules;
+    mapping (uint256 => mapping (uint256 => uint256)) public rpsRules;
 
     function RockPaperScissors(uint256 _gamePrice, uint256 _gameTimeoutBlocks) {
         require(_gamePrice != 0);
@@ -37,24 +35,24 @@ contract RockPaperScissors {
         gamePrice = _gamePrice;
         gameTimeoutBlocks = _gameTimeoutBlocks;
 
-        bet1.move = INVALID_MOVE;
-        bet2.move = INVALID_MOVE;
+        bet1.move = GameMove.VOID;
+        bet2.move = GameMove.VOID;
 
-        rpsRules[0][0] = 0; // R + R = -
-        rpsRules[0][1] = 2; // R + P = 2
-        rpsRules[0][2] = 1; // R + S = 1
-        rpsRules[1][0] = 1; // P + R = 1
-        rpsRules[1][1] = 0; // P + P = -
-        rpsRules[1][2] = 2; // P + S = 2
-        rpsRules[2][0] = 2; // S + R = 2
-        rpsRules[2][1] = 1; // S + P = 1
-        rpsRules[2][2] = 0; // S + S = -
+        rpsRules[uint256(GameMove.ROCK)]    [uint256(GameMove.ROCK)]     = 0; // R + R = -
+        rpsRules[uint256(GameMove.ROCK)]    [uint256(GameMove.PAPER)]    = 2; // R + P = 2
+        rpsRules[uint256(GameMove.ROCK)]    [uint256(GameMove.SCISSORS)] = 1; // R + S = 1
+        rpsRules[uint256(GameMove.PAPER)]   [uint256(GameMove.ROCK)]     = 1; // P + R = 1
+        rpsRules[uint256(GameMove.PAPER)]   [uint256(GameMove.PAPER)]    = 0; // P + P = -
+        rpsRules[uint256(GameMove.PAPER)]   [uint256(GameMove.SCISSORS)] = 2; // P + S = 2
+        rpsRules[uint256(GameMove.SCISSORS)][uint256(GameMove.ROCK)]     = 2; // S + R = 2
+        rpsRules[uint256(GameMove.SCISSORS)][uint256(GameMove.PAPER)]    = 1; // S + P = 1
+        rpsRules[uint256(GameMove.SCISSORS)][uint256(GameMove.SCISSORS)] = 0; // S + S = -
 
         LogCreation(msg.sender, gamePrice, gameTimeoutBlocks);
     }
     
     function canEnrol() public constant returns (bool gameOpen) {
-        return bet1.player == 0 && bet2.player != msg.sender || bet1.player != msg.sender && bet2.player == 0;
+        return (bet1.player == 0 && bet2.player != msg.sender) || (bet1.player != msg.sender && bet2.player == 0);
     }
 
     function enrol() public payable {
@@ -72,43 +70,44 @@ contract RockPaperScissors {
     }
 
     function canPlay(address player) public constant returns (bool gamePlayable) {
-        return player == bet1.player && !bet1.played || player == bet2.player && !bet2.played;
+        return (player == bet1.player && bet1.moveHash == 0x0) || (player == bet2.player && bet2.moveHash == 0x0);
     }
 
     function play(bytes32 moveHash) public {
         require(canPlay(msg.sender));
+        require(moveHash != 0);
 
         GameBet storage bet = msg.sender == bet1.player ? bet1 : bet2;
         bet.moveHash = moveHash;
-        bet.played = true;
 
         LogPlay(msg.sender, msg.sender == bet1.player ? 1 : 2);
     }
 
     function canReveal(address player) public constant returns (bool gameOpen) {
-        return player == bet1.player || player == bet2.player && bet1.played && bet2.played;
+        return (player == bet1.player) || (player == bet2.player && bet1.moveHash != 0x0 && bet2.moveHash != 0x0);
     }
 
     function reveal(GameMove move, bytes32 secret) public {
         require(canReveal(msg.sender));
+        require(move != GameMove.VOID);
 
-        if (bet1.move == INVALID_MOVE && bet2.move == INVALID_MOVE) {
+        if (bet1.move == GameMove.VOID && bet2.move == GameMove.VOID) {
             firstRevealBlock = block.number;
         }
 
         GameBet storage bet = msg.sender == bet1.player ? bet1 : bet2;
         require(bet.moveHash == hash(move, secret));
-        bet.move = int256(move);
+        bet.move = move;
 
-        LogReveal(msg.sender, int256(move));
+        LogReveal(msg.sender, uint256(move));
     }
 
     function bothMovesRevealed() public constant returns (bool movesRevealed) {
-        return bet1.move != INVALID_MOVE && bet2.move != INVALID_MOVE;
+        return bet1.move != GameMove.VOID && bet2.move != GameMove.VOID;
     }
 
     function timeoutExpired() public constant returns (bool timedOut) {
-        return (block.number > firstRevealBlock + gameTimeoutBlocks) && (bet1.move != INVALID_MOVE || bet2.move != INVALID_MOVE);
+        return (block.number > firstRevealBlock + gameTimeoutBlocks) && (bet1.move != GameMove.VOID || bet2.move != GameMove.VOID);
     }
 
     function isGameOver() public constant returns (bool gameOver) {
@@ -118,10 +117,10 @@ contract RockPaperScissors {
     function chooseWinner() public returns (uint256 winnerIndex) {
         require(isGameOver());
 
-        if (bet1.move != INVALID_MOVE) {
-            if (bet2.move != INVALID_MOVE) {
+        if (bet1.move != GameMove.VOID) {
+            if (bet2.move != GameMove.VOID) {
                 // Both moves revelead, apply the game winning rule.
-                winnerId = rpsRules[bet1.move][bet2.move];
+                winnerId = rpsRules[uint256(bet1.move)][uint256(bet2.move)];
             }
             else {
                 // Just move1 revelead and timeout expired, player1 wins.
@@ -134,8 +133,8 @@ contract RockPaperScissors {
         }
 
         // Reset the game moves.
-        bet1.move = INVALID_MOVE;
-        bet2.move = INVALID_MOVE;
+        bet1.move = GameMove.VOID;
+        bet2.move = GameMove.VOID;
 
         assert(this.balance == gamePrice * 2);
 
@@ -152,9 +151,9 @@ contract RockPaperScissors {
 
         // Reset the game.
         bet1.player = 0;
-        bet1.played = false;
+        bet1.moveHash = 0x0;
         bet2.player = 0;
-        bet2.played = false;
+        bet2.moveHash = 0x0;
 
         LogChooseWinner(msg.sender, winnerId);
 

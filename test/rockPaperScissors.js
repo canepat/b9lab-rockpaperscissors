@@ -35,12 +35,12 @@ contract('RockPaperScissors', function(accounts) {
     const GETH_SLOW_DURATION = 15000;
     const GAME_PRICE = web3.toWei(0.009, 'ether');
     const GAME_TIMEOUT = 2;
-    const ROCK = 0;
-    const PAPER = 1;
-    const SCISSORS = 2;
+    const ROCK = 1;
+    const PAPER = 2;
+    const SCISSORS = 3;
     const PLAYER1_SECRET = "secret1";
     const PLAYER2_SECRET = "secret2";
-    const INVALID_MOVE = -1;
+    const VOID_MOVE = 0;
 
     let isTestRPC, isGeth, slowDuration;
     before("should identify node", function() {
@@ -295,8 +295,7 @@ contract('RockPaperScissors', function(accounts) {
                     .then(() => instance.bet1())
                     .then(bet1 => {
                         assert.strictEqual(bet1[0], player1, "player1 not stored");
-                        assert.isTrue(bet1[1], "player1 has not played");
-                        assert.strictEqual(bet1[2], moveHash, "player1 moveHash not stored");
+                        assert.strictEqual(bet1[1], moveHash, "player1 moveHash not stored");
                     })
                     .then(() => instance.canReveal(player1))
                     .then(canPlayer1Reveal => {
@@ -331,8 +330,7 @@ contract('RockPaperScissors', function(accounts) {
                     .then(() => instance.bet2())
                     .then(bet2 => {
                         assert.strictEqual(bet2[0], player2, "player2 not stored");
-                        assert.isTrue(bet2[1], "player2 has not played");
-                        assert.strictEqual(bet2[2], moveHash, "player2 moveHash not stored");
+                        assert.strictEqual(bet2[1], moveHash, "player2 moveHash not stored");
                     })
                     .then(() => instance.canReveal(player1))
                     .then(canPlayer1Reveal => {
@@ -381,6 +379,40 @@ contract('RockPaperScissors', function(accounts) {
         it.skip("should fail if sender cannot reveal", function() {
             this.slow(slowDuration);
         });
+        it("should fail if passed move is void", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.reveal(VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if passed move is invalid", function() {
+            this.slow(slowDuration);
+
+            const INVALID_MOVE = 4;
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.hash(INVALID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
         it.skip("should fail if passed move and secret do not match hash", function() {
             this.slow(slowDuration);
         });
@@ -390,7 +422,7 @@ contract('RockPaperScissors', function(accounts) {
         it.skip("should store the clear move", function() {
             this.slow(slowDuration);
         });
-        it.skip("should have emitted LogReveal event", function() {
+        it("should have emitted LogReveal event", function() {
             this.slow(slowDuration);
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
@@ -444,7 +476,7 @@ contract('RockPaperScissors', function(accounts) {
                     );
                 });
         });
-        describe.only("should choose winner according to game rules", function() {
+        describe("should choose winner according to game rules", function() {
             this.slow(slowDuration);
 
             describe("forbidden", function() {
@@ -628,14 +660,12 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => instance.bet1())
                 .then(bet1 => {
                     assert.strictEqual(bet1[0], '0x0000000000000000000000000000000000000000', "bet1 player not reset");
-                    assert.isFalse(bet1[1], "bet1 played not reset");
-                    assert.equal(bet1[3], INVALID_MOVE, "bet1 move not reset");
+                    assert.equal(bet1[2], VOID_MOVE, "bet1 move not reset");
                 })
                 .then(() => instance.bet2())
                 .then(bet2 => {
                     assert.strictEqual(bet2[0], '0x0000000000000000000000000000000000000000', "bet2 player not reset");
-                    assert.isFalse(bet2[1], "bet2 played not reset");
-                    assert.equal(bet2[3], INVALID_MOVE, "bet2 move not reset");
+                    assert.equal(bet2[2], VOID_MOVE, "bet2 move not reset");
                 });
         });
         it("should have emitted LogChooseWinner event", function() {
