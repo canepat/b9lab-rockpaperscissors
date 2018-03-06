@@ -264,7 +264,7 @@ contract('RockPaperScissors', function(accounts) {
             this.slow(slowDuration);
 
             let moveHash;
-            return instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
                 .then(_moveHash => {
                     moveHash = _moveHash;
 
@@ -282,7 +282,7 @@ contract('RockPaperScissors', function(accounts) {
             let moveHash;
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(_moveHash => {
                     moveHash = _moveHash;
                     
@@ -315,9 +315,9 @@ contract('RockPaperScissors', function(accounts) {
             let moveHash;
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => {
                     moveHash = move2Hash;
                     
@@ -349,7 +349,7 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
                 .then(txObj => {
                     assert.equal(txObj.logs.length, 1); // just 1 LogPlay event
@@ -384,9 +384,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
@@ -407,7 +407,7 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.hash(INVALID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.hash(player1, INVALID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -427,9 +427,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(txObj => {
@@ -462,9 +462,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => {
@@ -493,9 +493,9 @@ contract('RockPaperScissors', function(accounts) {
                             function() {
                                 return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                                     .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                                    .then(() => instance.hash(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                                    .then(() => instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                                     .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                                    .then(() => instance.hash(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                                    .then(() => instance.hash(player2, move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                                     .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                                     .then(() => instance.reveal(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                                     .then(() => instance.reveal(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
@@ -522,9 +522,9 @@ contract('RockPaperScissors', function(accounts) {
                             function() {
                                 return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                                     .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                                    .then(() => instance.hash(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                                    .then(() => instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                                     .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                                    .then(() => instance.hash(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                                    .then(() => instance.hash(player2, move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                                     .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                                     .then(() => instance.reveal(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                                     .then(() => instance.reveal(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
@@ -546,9 +546,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.firstRevealBlock())
@@ -562,9 +562,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.firstRevealBlock())
@@ -579,9 +579,9 @@ contract('RockPaperScissors', function(accounts) {
             let balance1Before, balance2Before;
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
@@ -615,9 +615,9 @@ contract('RockPaperScissors', function(accounts) {
             let balance1Before, balance2Before;
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
@@ -650,9 +650,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
@@ -673,9 +673,9 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))

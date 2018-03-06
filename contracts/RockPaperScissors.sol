@@ -96,7 +96,7 @@ contract RockPaperScissors {
         }
 
         GameBet storage bet = msg.sender == bet1.player ? bet1 : bet2;
-        require(bet.moveHash == hash(move, secret));
+        require(bet.moveHash == hash(msg.sender, move, secret));
         bet.move = move;
 
         LogReveal(msg.sender, uint256(move));
@@ -160,8 +160,8 @@ contract RockPaperScissors {
         return winnerId;
     }
 
-    function hash(GameMove move, bytes32 secret) public constant returns (bytes32 secretHash) {
-        return keccak256(move, secret);
+    function hash(address sender, GameMove move, bytes32 secret) public constant returns (bytes32 secretHash) {
+        return keccak256(sender, move, secret);
     }
 
     function () public payable {
