@@ -35,12 +35,13 @@ contract('RockPaperScissors', function(accounts) {
     const GETH_SLOW_DURATION = 15000;
     const GAME_PRICE = web3.toWei(0.009, 'ether');
     const GAME_TIMEOUT = 2;
+    const PLAYER1_SECRET = "secret1";
+    const PLAYER2_SECRET = "secret2";
+    // Game moves
+    const VOID = 0;
     const ROCK = 1;
     const PAPER = 2;
     const SCISSORS = 3;
-    const PLAYER1_SECRET = "secret1";
-    const PLAYER2_SECRET = "secret2";
-    const VOID_MOVE = 0;
 
     let isTestRPC, isGeth, slowDuration;
     before("should identify node", function() {
@@ -384,30 +385,14 @@ contract('RockPaperScissors', function(accounts) {
 
             return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
                 .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player1, VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(VOID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
-                        },
-                        MAX_GAS
-                    );
-                });
-        });
-        it("should fail if passed move is invalid", function() {
-            this.slow(slowDuration);
-
-            const INVALID_MOVE = 4;
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => {
-                    return web3.eth.expectedExceptionPromise(
-                        function() {
-                            return instance.hash(player1, INVALID_MOVE, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.reveal(VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -585,10 +570,10 @@ contract('RockPaperScissors', function(accounts) {
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => web3.eth.getBalance(player1))
+                .then(() => instance.balances(player1))
                 .then(_balance1Before => {
                     balance1Before = _balance1Before;
-                    return web3.eth.getBalance(player2);
+                    return instance.balances(player2);
                 })
                 .then(_balance2Before => {
                     balance2Before = _balance2Before;
@@ -597,12 +582,12 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => instance.winnerId())
                 .then(winnerId => {
                     assert.equal(winnerId, 2, "game winner is not player2");
-                    return web3.eth.getBalance(player1);
+                    return instance.balances(player1);
                 })
                 .then(_balance1After => {
                     const balance1Delta = _balance1After.minus(balance1Before);
                     assert.equal(balance1Delta, 0, "player1 balance delta is not zero");
-                    return web3.eth.getBalance(player2);
+                    return instance.balances(player2);
                 })
                 .then(_balance2After => {
                     const balance2Delta = _balance2After.minus(balance2Before);
@@ -621,10 +606,10 @@ contract('RockPaperScissors', function(accounts) {
                 .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => web3.eth.getBalance(player1))
+                .then(() => instance.balances(player1))
                 .then(_balance1Before => {
                     balance1Before = _balance1Before;
-                    return web3.eth.getBalance(player2);
+                    return instance.balances(player2);
                 })
                 .then(_balance2Before => {
                     balance2Before = _balance2Before;
@@ -633,12 +618,12 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => instance.winnerId())
                 .then(winnerId => {
                     assert.equal(winnerId, 0, "game is not a draw");
-                    return web3.eth.getBalance(player1);
+                    return instance.balances(player1);
                 })
                 .then(_balance1After => {
                     const balance1Delta = _balance1After.minus(balance1Before);
                     assert.equal(balance1Delta, GAME_PRICE, "player1 balance delta is not equal to half the award");
-                    return web3.eth.getBalance(player2);
+                    return instance.balances(player2);
                 })
                 .then(_balance2After => {
                     const balance2Delta = _balance2After.minus(balance2Before);
@@ -660,12 +645,12 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => instance.bet1())
                 .then(bet1 => {
                     assert.strictEqual(bet1[0], '0x0000000000000000000000000000000000000000', "bet1 player not reset");
-                    assert.equal(bet1[2], VOID_MOVE, "bet1 move not reset");
+                    assert.equal(bet1[2], VOID, "bet1 move not reset");
                 })
                 .then(() => instance.bet2())
                 .then(bet2 => {
                     assert.strictEqual(bet2[0], '0x0000000000000000000000000000000000000000', "bet2 player not reset");
-                    assert.equal(bet2[2], VOID_MOVE, "bet2 move not reset");
+                    assert.equal(bet2[2], VOID, "bet2 move not reset");
                 });
         });
         it("should have emitted LogChooseWinner event", function() {
@@ -700,6 +685,125 @@ contract('RockPaperScissors', function(accounts) {
 
                     const receiptLogEvent = instance.LogChooseWinner().formatter(receiptRawLogEvent);
                     assert.deepEqual(receiptLogEvent, txLogEvent, "LogChooseWinner receipt event is different from tx event");
+                });
+        });
+    });
+
+    describe("#withdraw()", function() {
+        it("should fail if caller deposit is zero", function() {
+            this.slow(slowDuration);
+
+            return instance.balances(player1)
+                .then(balance => assert.equal(balance, 0, "caller deposit is not zero"))
+                .then(function() {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.withdraw({ from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should clear caller deposit", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+                .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
+                .then(() => instance.balances(player1))
+                .then(balance1 => assert.equal(balance1, 0, "player1 balance not zero"))
+                .then(() => instance.withdraw({ from: player2, gas: MAX_GAS }))
+                .then(() => instance.balances(player2))
+                .then(balance2 => assert.equal(balance2, 0, "player2 balance not zero"));
+        });
+        it("should increase caller balance", function() {
+            this.slow(slowDuration);
+
+            let balance1Before, balance2Before, txObj, gasPrice, withdraw1TxCost, withdraw2TxCost;
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+                .then(() => web3.eth.getBalancePromise(player1))
+                .then(balance1 => balance1Before = balance1)
+                .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
+                .then(_txObj => {
+                    txObj = _txObj;
+                    return web3.eth.getTransactionPromise(txObj.tx);
+                })
+                .then(tx => {
+                    gasPrice = tx.gasPrice;
+                    withdraw1TxCost = gasPrice * txObj.receipt.gasUsed;
+                    return web3.eth.getBalancePromise(player1);
+                })
+                .then(balance1 => {
+                    const balance1Diff = balance1.minus(balance1Before).plus(withdraw1TxCost);
+                    assert.equal(balance1Diff, GAME_PRICE, "player1 balance not increased")
+                })
+                .then(() => web3.eth.getBalancePromise(player2))
+                .then(balance2 => balance2Before = balance2)
+                .then(() => instance.withdraw({ from: player2, gas: MAX_GAS }))
+                .then(_txObj => {
+                    txObj = _txObj;
+                    return web3.eth.getTransactionPromise(txObj.tx);
+                })
+                .then(tx => {
+                    gasPrice = tx.gasPrice;
+                    withdraw2TxCost = gasPrice * txObj.receipt.gasUsed;
+                    return web3.eth.getBalancePromise(player2);
+                })
+                .then(balance2 => {
+                    const balance2Diff = balance2.minus(balance2Before).plus(withdraw2TxCost);
+                    assert.equal(balance2Diff, GAME_PRICE, "player2 balance not increased")
+                });
+        });
+        it("should have emitted LogWithdraw event", function() {
+            this.slow(slowDuration);
+
+            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
+                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.hash(player2, SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.reveal(SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+                .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
+                .then(txObj => {
+                    assert.isAtMost(txObj.logs.length, txObj.receipt.logs.length);
+                    assert.equal(txObj.logs.length, 1); // just 1 LogWithdraw event
+                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogWithdraw event
+
+                    const EXPECTED_ARG_LENGTH = 2;
+                    const txLogEvent = txObj.logs[0];
+                    const eventName = txLogEvent.event;
+                    const playerArg = txLogEvent.args.player;
+                    const amountArg = txLogEvent.args.amount;
+                    assert.equal(eventName, "LogWithdraw", "LogWithdraw name is wrong");
+                    assert.equal(playerArg, player1, "LogWithdraw arg player is wrong: " + playerArg);
+                    assert.equal(amountArg, GAME_PRICE*2, "LogWithdraw arg amount is wrong: " + amountArg);
+                    assert.equal(Object.keys(txLogEvent.args).length, EXPECTED_ARG_LENGTH);
+
+                    const EXPECTED_TOPIC_LENGTH = 3;
+                    const receiptRawLogEvent = txObj.receipt.logs[0];
+                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogWithdraw(address,uint256)"));
+                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
+
+                    const receiptLogEvent = instance.LogWithdraw().formatter(receiptRawLogEvent);
+                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogWithdraw receipt event is different from tx event");
                 });
         });
     });
