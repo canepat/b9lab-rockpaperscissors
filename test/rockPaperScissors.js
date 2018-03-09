@@ -519,7 +519,7 @@ contract('RockPaperScissors', function(accounts) {
                         )
                         .then(() => instance.winnerId())
                         .then(winnerId => {
-                            assert.equal(winnerId, winner, `game winner is not ${winner}`);
+                            assert.equal(winnerId.toNumber(), winner, `game winner is not ${winner} with [${move1}, ${move2}]`);
                             return winnerId;
                         });
                     });
