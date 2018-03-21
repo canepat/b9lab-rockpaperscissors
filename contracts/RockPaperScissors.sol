@@ -3,8 +3,8 @@ pragma solidity ^0.4.13;
 contract RockPaperScissors {
     event LogCreation(address indexed owner, uint256 indexed gamePrice, uint256 indexed gameTimeoutBlocks);
     event LogEnrol(address indexed caller, uint256 indexed betId);
-    event LogPlay(address indexed caller, uint256 indexed betId);
-    event LogReveal(address indexed caller, uint256 indexed move);
+    event LogPlay(address indexed caller, uint256 indexed betId, bytes32 indexed moveHash);
+    event LogReveal(address indexed caller, uint256 indexed betId, uint256 indexed move);
     event LogChooseWinner(address indexed caller, uint256 indexed winnerId);
     event LogWithdraw(address indexed player, uint256 indexed amount);
 
@@ -15,11 +15,10 @@ contract RockPaperScissors {
         bytes32 moveHash;
         GameMove move;
     }
-
+    
     uint256 public gamePrice;
-    uint256 public winnerReward;
+    uint256 public gameStartBlock;
     uint256 public gameTimeoutBlocks;
-    uint256 public firstRevealBlock;
     GameBet public bet1;
     GameBet public bet2;
     uint256 public winnerId;
@@ -30,69 +29,71 @@ contract RockPaperScissors {
         require(_gameTimeoutBlocks != 0);
 
         gamePrice = _gamePrice;
-        winnerReward = _gamePrice * 2;
         gameTimeoutBlocks = _gameTimeoutBlocks;
-
-        bet1.move = GameMove.VOID;
-        bet2.move = GameMove.VOID;
 
         LogCreation(msg.sender, _gamePrice, _gameTimeoutBlocks);
     }
-    
-    function canEnrol() public constant returns(bool gameOpen) {
-        return (bet1.player == 0 && bet2.player != msg.sender) || (bet1.player != msg.sender && bet2.player == 0);
+
+    function canEnrolAs() public constant returns(uint256 betId) {
+        return (bet1.player == 0 && bet2.player != msg.sender) ? 1
+            : (bet1.player != msg.sender && bet2.player == 0) ? 2
+            : 0;
     }
 
-    function enrol() public payable {
-        require(canEnrol());
+    function enrol() public payable returns(uint256 betId) {
         require(msg.value == gamePrice);
+        
+        betId = canEnrolAs();
 
-        uint256 betId;
-        if (bet1.player == 0) {
-            bet1.player = msg.sender;
-            betId = 1;
+        require(betId != 0);
+
+        if (bet1.player == 0 && bet2.player == 0) {
+            gameStartBlock = block.number;
         }
-        else {
-            bet2.player = msg.sender;
-            betId = 2;
-        }
+
+        GameBet storage bet = betId == 1 ? bet1 : bet2;
+        bet.player = msg.sender;
 
         LogEnrol(msg.sender, betId);
     }
 
-    function canPlay(address player) public constant returns(bool gamePlayable) {
-        return (player == bet1.player && bet1.moveHash == 0x0) || (player == bet2.player && bet2.moveHash == 0x0);
+    function canPlayAs(address player) public constant returns(uint256 betId) {
+        return (player == bet1.player && bet1.moveHash == 0x0) ? 1
+            : (player == bet2.player && bet2.moveHash == 0x0) ? 2
+            : 0;
     }
 
-    function play(bytes32 moveHash) public {
-        require(canPlay(msg.sender));
+    function play(bytes32 moveHash) public returns(uint256 betId) {
         require(moveHash != 0);
 
-        bool isPlayer1 = msg.sender == bet1.player;
+        betId = canPlayAs(msg.sender);
 
-        GameBet storage bet = isPlayer1 ? bet1 : bet2;
+        require(betId != 0);
+
+        GameBet storage bet = betId == 1 ? bet1 : bet2;
         bet.moveHash = moveHash;
 
-        LogPlay(msg.sender, isPlayer1 ? 1 : 2);
+        LogPlay(msg.sender, betId, moveHash);
     }
 
-    function canReveal(address player) public constant returns(bool gameOpen) {
-        return (player == bet1.player) || (player == bet2.player && bet1.moveHash != 0x0 && bet2.moveHash != 0x0);
+    function canRevealAs(address player) public constant returns(uint256 betId) {
+        return (player == bet1.player && bet1.moveHash != 0x0) ? 1
+            : (player == bet2.player && bet2.moveHash != 0x0) ? 2
+            : 0;
     }
 
-    function reveal(uint8 move, bytes32 secret) public {
-        require(canReveal(msg.sender));
+    function reveal(uint8 move, bytes32 secret) public returns(uint256 betId) {
         require(GameMove(move) != GameMove.VOID);
 
-        if (bet1.move == GameMove.VOID && bet2.move == GameMove.VOID) {
-            firstRevealBlock = block.number;
-        }
+        betId = canRevealAs(msg.sender);
 
-        GameBet storage bet = msg.sender == bet1.player ? bet1 : bet2;
+        require(betId != 0);
+
+        GameBet storage bet = betId == 1 ? bet1 : bet2;
         require(bet.moveHash == hash(msg.sender, move, secret));
         bet.move = GameMove(move);
 
-        LogReveal(msg.sender, move);
+        LogReveal(msg.sender, betId, move);
     }
 
     function bothMovesRevealed() public constant returns(bool movesRevealed) {
@@ -100,7 +101,7 @@ contract RockPaperScissors {
     }
 
     function timeoutExpired() public constant returns(bool timedOut) {
-        return (block.number > firstRevealBlock + gameTimeoutBlocks) && (bet1.move != GameMove.VOID || bet2.move != GameMove.VOID);
+        return block.number > gameStartBlock + gameTimeoutBlocks;
     }
 
     function isGameOver() public constant returns(bool gameOver) {
@@ -112,26 +113,25 @@ contract RockPaperScissors {
 
         winnerId = outcome(bet1.move, bet2.move);
 
-        // Reset the game moves.
-        bet1.move = GameMove.VOID;
-        bet2.move = GameMove.VOID;
-
         if (winnerId == 1) {
-            balances[bet1.player] += winnerReward;
+            balances[bet1.player] += gamePrice * 2;
         }
         else if (winnerId == 2) {
-            balances[bet2.player] += winnerReward;
+            balances[bet2.player] += gamePrice * 2;
         }
         else {
-            balances[bet1.player] += gamePrice;
-            balances[bet2.player] += gamePrice;
+            if (bet1.player != 0) balances[bet1.player] += gamePrice;
+            if (bet2.player != 0) balances[bet2.player] += gamePrice;
         }
 
         // Reset the game.
+        gameStartBlock = 0;
         bet1.player = 0;
         bet1.moveHash = 0x0;
+        bet1.move = GameMove.VOID;
         bet2.player = 0;
         bet2.moveHash = 0x0;
+        bet2.move = GameMove.VOID;
 
         LogChooseWinner(msg.sender, winnerId);
 
@@ -145,9 +145,9 @@ contract RockPaperScissors {
 
         balances[msg.sender] = 0;
         
-        msg.sender.transfer(amount);
+        LogWithdraw(msg.sender, amount);
 
-        LogWithdraw(msg.sender, amount);   
+        msg.sender.transfer(amount);
     }
 
     function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {

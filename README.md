@@ -10,7 +10,7 @@ You will create a smart contract named RockPaperScissors whereby:
 
 ### Stretch goals:
 * make it a utility whereby any 2 people can decide to play against each other
-* reduce
+* reduce gas cost as much as you can
 
 ### Implementation:
 The following implementation choices has been made not explicitly required by spec:
