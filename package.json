@@ -27,6 +27,7 @@
   "homepage": "https://github.com/canepat/b9lab-rockpaperscissors#readme",
   "dependencies": {
     "bluebird": "^3.5.1",
-    "bluebird-retry": "^0.11.0"
+    "bluebird-retry": "^0.11.0",
+    "web3-utils": "^1.0.0-beta.33"
   }
 }

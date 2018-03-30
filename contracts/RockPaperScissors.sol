@@ -1,11 +1,32 @@
 pragma solidity ^0.4.13;
 
 contract RockPaperScissors {
-    event LogCreation(address indexed owner, uint256 indexed gamePrice, uint256 indexed gameTimeoutBlocks);
-    event LogEnrol(address indexed caller, uint256 indexed betId);
-    event LogPlay(address indexed caller, uint256 indexed betId, bytes32 indexed moveHash);
-    event LogReveal(address indexed caller, uint256 indexed betId, uint256 indexed move);
-    event LogChooseWinner(address indexed caller, uint256 indexed winnerId);
+    event LogGameCreated(
+        address indexed player1,
+        address indexed player2,
+        bytes32 indexed gameHash,
+        uint256 gamePrice,
+        uint256 gameTimeoutBlocks
+    );
+    event LogGameJoined(
+        address indexed player1,
+        address indexed player2,
+        bytes32 indexed gameHash,
+        uint8 move2
+    );
+    event LogGameRevealed(
+        address indexed player1,
+        address indexed player2,
+        bytes32 indexed gameHash,
+        uint8 move1,
+        uint256 winnerId
+    );
+    event LogGameClaimed(
+        address indexed player1,
+        address indexed player2,
+        bytes32 indexed gameHash,
+        uint256 winnerId
+    );    
     event LogWithdraw(address indexed player, uint256 indexed amount);
 
     enum GameMove { VOID, ROCK, PAPER, SCISSORS }
@@ -15,127 +36,153 @@ contract RockPaperScissors {
         bytes32 moveHash;
         GameMove move;
     }
-    
-    uint256 public gamePrice;
-    uint256 public gameStartBlock;
-    uint256 public gameTimeoutBlocks;
-    GameBet public bet1;
-    GameBet public bet2;
-    uint256 public winnerId;
+
+    struct Game {
+        uint256 price;
+        uint256 startBlock;
+        uint256 timeoutBlocks;
+        GameBet bet1;
+        GameBet bet2;
+        uint256 winnerId;
+    }
+
+    mapping(bytes32 => Game) private games;
+
     mapping(address => uint256) public balances;
 
-    function RockPaperScissors(uint256 _gamePrice, uint256 _gameTimeoutBlocks) {
+    function startGame(bytes32 _move1Hash, address _player2, uint256 _gamePrice, uint256 _gameTimeoutBlocks)
+    public payable returns (bytes32 gameHash)
+    {
+        require(_move1Hash != 0);
+        require(_player2 != 0);
         require(_gamePrice != 0);
         require(_gameTimeoutBlocks != 0);
+        require(msg.value == _gamePrice);
 
-        gamePrice = _gamePrice;
-        gameTimeoutBlocks = _gameTimeoutBlocks;
+        gameHash = keccak256(msg.sender, _player2);
+        Game storage newGame = games[gameHash];
+        require(newGame.bet1.player == 0 && newGame.bet2.player == 0);
 
-        LogCreation(msg.sender, _gamePrice, _gameTimeoutBlocks);
+        newGame.price = _gamePrice;
+        newGame.startBlock = block.number;
+        newGame.timeoutBlocks = _gameTimeoutBlocks;
+        newGame.bet1.player = msg.sender;
+        newGame.bet1.moveHash = _move1Hash;
+        newGame.bet2.player = _player2;
+        newGame.winnerId = 0;
+
+        LogGameCreated(msg.sender, _player2, gameHash, _gamePrice, _gameTimeoutBlocks);
     }
 
-    function canEnrolAs() public constant returns(uint256 betId) {
-        return (bet1.player == 0 && bet2.player != msg.sender) ? 1
-            : (bet1.player != msg.sender && bet2.player == 0) ? 2
-            : 0;
-    }
+    function joinGame(bytes32 _gameHash, uint8 _move2) public payable returns (bool joined) {
+        require(_gameHash != 0);
+        require(GameMove(_move2) != GameMove.VOID);
+        require(!isGameOver(_gameHash));
 
-    function enrol() public payable returns(uint256 betId) {
-        require(msg.value == gamePrice);
+        Game storage joinedGame = games[_gameHash];
         
-        betId = canEnrolAs();
+        require(msg.value == joinedGame.price);
+        require(joinedGame.bet1.player != 0 && joinedGame.bet2.player == msg.sender);
+        require(joinedGame.bet2.move == GameMove.VOID);
 
-        require(betId != 0);
+        joinedGame.bet2.move = GameMove(_move2);
 
-        if (bet1.player == 0 && bet2.player == 0) {
-            gameStartBlock = block.number;
-        }
+        LogGameJoined(joinedGame.bet1.player, msg.sender, _gameHash, _move2);
 
-        GameBet storage bet = betId == 1 ? bet1 : bet2;
-        bet.player = msg.sender;
-
-        LogEnrol(msg.sender, betId);
+        return true;
     }
 
-    function canPlayAs(address player) public constant returns(uint256 betId) {
-        return (player == bet1.player && bet1.moveHash == 0x0) ? 1
-            : (player == bet2.player && bet2.moveHash == 0x0) ? 2
-            : 0;
-    }
+    function revealGame(bytes32 _gameHash, uint8 _move1, bytes32 _secret1) public returns(uint256 winnerId) {
+        require(_gameHash != 0);
+        require(GameMove(_move1) != GameMove.VOID);
+        require(!isGameOver(_gameHash));
+        
+        Game storage revealedGame = games[_gameHash];
+        address player1 = revealedGame.bet1.player;
+        address player2 = revealedGame.bet2.player;
 
-    function play(bytes32 moveHash) public returns(uint256 betId) {
-        require(moveHash != 0);
+        require(msg.sender == player1);
+        require(revealedGame.bet1.move == GameMove.VOID && revealedGame.bet2.move != GameMove.VOID);
+        require(revealedGame.bet1.moveHash == hash(msg.sender, _move1, _secret1));
 
-        betId = canPlayAs(msg.sender);
+        revealedGame.bet1.move = GameMove(_move1);
 
-        require(betId != 0);
+        winnerId = chooseWinner(revealedGame);
+        assignReward(revealedGame, winnerId);
+        reset(revealedGame, winnerId);
 
-        GameBet storage bet = betId == 1 ? bet1 : bet2;
-        bet.moveHash = moveHash;
-
-        LogPlay(msg.sender, betId, moveHash);
-    }
-
-    function canRevealAs(address player) public constant returns(uint256 betId) {
-        return (player == bet1.player && bet1.moveHash != 0x0) ? 1
-            : (player == bet2.player && bet2.moveHash != 0x0) ? 2
-            : 0;
-    }
-
-    function reveal(uint8 move, bytes32 secret) public returns(uint256 betId) {
-        require(GameMove(move) != GameMove.VOID);
-
-        betId = canRevealAs(msg.sender);
-
-        require(betId != 0);
-
-        GameBet storage bet = betId == 1 ? bet1 : bet2;
-        require(bet.moveHash == hash(msg.sender, move, secret));
-        bet.move = GameMove(move);
-
-        LogReveal(msg.sender, betId, move);
-    }
-
-    function bothMovesRevealed() public constant returns(bool movesRevealed) {
-        return bet1.move != GameMove.VOID && bet2.move != GameMove.VOID;
-    }
-
-    function timeoutExpired() public constant returns(bool timedOut) {
-        return block.number > gameStartBlock + gameTimeoutBlocks;
-    }
-
-    function isGameOver() public constant returns(bool gameOver) {
-        return bothMovesRevealed() || timeoutExpired();
-    }
-
-    function chooseWinner() public returns(uint256 winnerIndex) {
-        require(isGameOver());
-
-        winnerId = outcome(bet1.move, bet2.move);
-
-        if (winnerId == 1) {
-            balances[bet1.player] += gamePrice * 2;
-        }
-        else if (winnerId == 2) {
-            balances[bet2.player] += gamePrice * 2;
-        }
-        else {
-            if (bet1.player != 0) balances[bet1.player] += gamePrice;
-            if (bet2.player != 0) balances[bet2.player] += gamePrice;
-        }
-
-        // Reset the game.
-        gameStartBlock = 0;
-        bet1.player = 0;
-        bet1.moveHash = 0x0;
-        bet1.move = GameMove.VOID;
-        bet2.player = 0;
-        bet2.moveHash = 0x0;
-        bet2.move = GameMove.VOID;
-
-        LogChooseWinner(msg.sender, winnerId);
+        LogGameRevealed(player1, player2, _gameHash, _move1, winnerId);
 
         return winnerId;
+    }
+
+    function claimGame(bytes32 _gameHash) public returns(uint256 winnerId) {
+        require(_gameHash != 0);
+        require(timeoutExpired(_gameHash));
+        
+        Game storage claimedGame = games[_gameHash];
+
+        winnerId = chooseWinner(claimedGame);
+        assignReward(claimedGame, winnerId);
+        reset(claimedGame, winnerId);
+
+        LogGameClaimed(claimedGame.bet1.player, claimedGame.bet2.player, _gameHash, winnerId);
+
+        return winnerId;
+    }
+
+    function gamePrice(bytes32 gameHash) public constant returns(uint256 price) {
+        return games[gameHash].price;
+    }
+
+    function gameStartBlock(bytes32 gameHash) public constant returns(uint256 startBlock) {
+        return games[gameHash].startBlock;
+    }
+
+    function gameTimeoutBlocks(bytes32 gameHash) public constant returns(uint256 timeoutBlocks) {
+        return games[gameHash].timeoutBlocks;
+    }
+
+    function gamePlayer1(bytes32 gameHash) public constant returns(address player1) {
+        return games[gameHash].bet1.player;
+    }
+
+    function gameMoveHash1(bytes32 gameHash) public constant returns(bytes32 moveHash1) {
+        return games[gameHash].bet1.moveHash;
+    }
+
+    function gameMove1(bytes32 gameHash) public constant returns(GameMove move1) {
+        return games[gameHash].bet1.move;
+    }
+
+    function gamePlayer2(bytes32 gameHash) public constant returns(address player2) {
+        return games[gameHash].bet2.player;
+    }
+
+    function gameMoveHash2(bytes32 gameHash) public constant returns(bytes32 moveHash2) {
+        return games[gameHash].bet2.moveHash;
+    }
+
+    function gameMove2(bytes32 gameHash) public constant returns(GameMove move2) {
+        return games[gameHash].bet2.move;
+    }
+
+    function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {
+        return keccak256(sender, move, secret);
+    }
+
+    function bothMovesRevealed(bytes32 _gameHash) public constant returns(bool movesRevealed) {
+        Game memory game = games[_gameHash];
+        return game.bet1.move != GameMove.VOID && game.bet2.move != GameMove.VOID;
+    }
+
+    function timeoutExpired(bytes32 _gameHash) public constant returns(bool timedOut) {
+        Game memory game = games[_gameHash];
+        return block.number > game.startBlock + game.timeoutBlocks;
+    }
+
+    function isGameOver(bytes32 _gameHash) public constant returns(bool gameOver) {
+        return bothMovesRevealed(_gameHash) || timeoutExpired(_gameHash);
     }
 
     function withdraw() public {
@@ -150,11 +197,13 @@ contract RockPaperScissors {
         msg.sender.transfer(amount);
     }
 
-    function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {
-        return keccak256(sender, move, secret);
+    function () public payable {
+        revert();
     }
 
-    function outcome(GameMove move1, GameMove move2) public constant returns(uint256 winnerIndex) {
+    function chooseWinner(Game revealedGame) private constant returns(uint256 winnerIndex) {
+        GameMove move1 = revealedGame.bet1.move;
+        GameMove move2 = revealedGame.bet2.move;
         if (move1 == move2) return 0;
         if (move1 == GameMove.VOID) return 2;
         if (move2 == GameMove.VOID) return 1;
@@ -163,7 +212,32 @@ contract RockPaperScissors {
         return (move1 > move2) ? 1 : 2;
     }
 
-    function () public payable {
-        revert();
+    function assignReward(Game revealedGame, uint256 winnerId) private {
+        address player1 = revealedGame.bet1.player;
+        address player2 = revealedGame.bet2.player;
+
+        if (winnerId == 1) {
+            balances[player1] += revealedGame.price * 2;
+        }
+        else if (winnerId == 2) {
+            balances[player2] += revealedGame.price * 2;
+        }
+        else {
+            if (player1 != 0) balances[player1] += revealedGame.price;
+            if (player2 != 0) balances[player2] += revealedGame.price;
+        }
+    }
+
+    function reset(Game storage revealedGame, uint256 winnerId) private {
+        revealedGame.price = 0;
+        revealedGame.startBlock = 0;
+        revealedGame.timeoutBlocks = 0;
+        revealedGame.bet1.player = 0;
+        revealedGame.bet1.moveHash = 0x0;
+        revealedGame.bet1.move = GameMove.VOID;
+        revealedGame.bet2.player = 0;
+        revealedGame.bet2.moveHash = 0x0;
+        revealedGame.bet2.move = GameMove.VOID;
+        revealedGame.winnerId = winnerId;
     }
 }

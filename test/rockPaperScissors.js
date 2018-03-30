@@ -2,6 +2,7 @@
 
 // Import the third-party libraries
 const Promise = require("bluebird");
+const Web3Utils = require("web3-utils");
 
 // Import the local libraries and customize the web3 environment
 const addEvmFunctions = require("../utils/evmFunctions.js");
@@ -31,9 +32,9 @@ const rockPaperScissorsTestSets = require("./rockPaperScissorsTestSets.js");
 
 contract('RockPaperScissors', function(accounts) {
     const MAX_GAS = 4000000;
-    const TESTRPC_SLOW_DURATION = 1000;
-    const GETH_SLOW_DURATION = 15000;
-    const GAME_PRICE = web3.toWei(0.009, 'ether');
+    const TESTRPC_SLOW_DURATION = 10000;
+    const GETH_SLOW_DURATION = 120000;
+    const GAME_PRICE = web3.toBigNumber(web3.toWei(0.009, 'ether'));
     const GAME_TIMEOUT = 8;
     const PLAYER1_SECRET = "secret1";
     const PLAYER2_SECRET = "secret2";
@@ -77,347 +78,601 @@ contract('RockPaperScissors', function(accounts) {
 
     let instance;
     beforeEach("should deploy a RockPaperScissors instance", function() {
-        return RockPaperScissors.new(GAME_PRICE, GAME_TIMEOUT, { from: owner, gas: MAX_GAS })
+        return RockPaperScissors.new({ from: owner, gas: MAX_GAS })
             .then(function(_instance) {
                 instance = _instance;
             });
     });
 
-    describe("#RockPaperScissors()", function() {
-        it("should fail if game price is zero", function() {
+    describe("#startGame()", function() {
+        it("should fail if hashed move1 is zero", function() {
             this.slow(slowDuration);
 
             return web3.eth.expectedExceptionPromise(
                 function() {
-                    return RockPaperScissors.new(0, GAME_TIMEOUT, { from: owner, gas: MAX_GAS });
+                    return instance.startGame(0, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS });
                 },
                 MAX_GAS
             );
+        });
+        it("should fail if player2 is zero", function() {
+            this.slow(slowDuration);
+
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(move1Hash => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.startGame(move1Hash, 0, GAME_PRICE, GAME_TIMEOUT,
+                                { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game price is zero", function() {
+            this.slow(slowDuration);
+
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(move1Hash => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.startGame(move1Hash, player2, 0, GAME_TIMEOUT,
+                                { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
         });
         it("should fail if game timeout in blocks is zero", function() {
             this.slow(slowDuration);
 
-            return web3.eth.expectedExceptionPromise(
-                function() {
-                    return RockPaperScissors.new(GAME_PRICE, 0, { from: owner, gas: MAX_GAS });
-                },
-                MAX_GAS
-            );
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(move1Hash => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.startGame(move1Hash, player2, GAME_PRICE, 0,
+                                { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
         });
-        it("should return provided game price", function() {
+        it("should fail if first player does not pay the game price", function() {
             this.slow(slowDuration);
 
-            return instance.gamePrice()
-                .then(realGamePrice => assert.equal(GAME_PRICE, realGamePrice, "provided game price not returned"));
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(move1Hash => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                { from: player1, gas: MAX_GAS, value: GAME_PRICE.minus(1) });
+                        },
+                        MAX_GAS
+                    );
+                });
         });
-        it("should return provided game timeout in blocks", function() {
+        it("should fail if game is already started", function() {
             this.slow(slowDuration);
 
-            return instance.gameTimeoutBlocks()
-                .then(realGameTimeout => assert.equal(GAME_TIMEOUT, realGameTimeout, "provided game timeout not returned"));
-        });
-        it("should initialize game moves as void", function() {
-            this.slow(slowDuration);
-
-            return instance.bet1()
-                .then(bet1 => {
-                    assert.strictEqual(0, bet1[2].toNumber(), "bet1 move not void");
-                    return instance.bet2();
+            let move1Hash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 })
-                .then(bet2 => assert.strictEqual(0, bet2[2].toNumber(), "bet2 move not void"));
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
         });
-        it("should be enrollable after creation", function() {
+        it("should initialize game with parameters and default values", function() {
             this.slow(slowDuration);
 
-            return instance.canEnrolAs()
-                .then(betId => assert.isTrue(betId == 1 || betId == 2, "created game not enrollable to player neither 1 nor 2"));
+            let move1Hash, gameHash, block;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.gamePrice(gameHash))
+                .then(gamePrice => assert.strictEqual(gamePrice.toNumber(), GAME_PRICE.toNumber(),
+                    "provided game price not returned"))
+                .then(() => instance.gameTimeoutBlocks(gameHash))
+                .then(gameTimeoutBlocks => assert.strictEqual(gameTimeoutBlocks.toNumber(), GAME_TIMEOUT,
+                    "provided game timeout blocks not returned"))
+                .then(() => web3.eth.getBlockPromise('latest'))
+                .then(_block => {
+                    block = _block;
+                    return instance.gameStartBlock(gameHash);
+                })
+                .then(gameStartBlock => assert.strictEqual(gameStartBlock.toNumber(), block.number,
+                    "game start block is not latest"))
+                .then(() => instance.gamePlayer1(gameHash))
+                .then(gamePlayer1 => assert.strictEqual(gamePlayer1, player1, "game player1 not returned"))
+                .then(() => instance.gameMoveHash1(gameHash))
+                .then(hashedMove1 => assert.strictEqual(hashedMove1, move1Hash,
+                    "game move1Hash not returned"))
+                .then(() => instance.gameMove1(gameHash))
+                .then(gameMove1 => assert.strictEqual(gameMove1.toNumber(), VOID, "game move1 not VOID"))
+                .then(() => instance.gamePlayer2(gameHash))
+                .then(gamePlayer2 => assert.strictEqual(gamePlayer2, player2, "game player2 not returned"))
+                .then(() => instance.gameMoveHash2(gameHash))
+                .then(hashedMove2 => assert.strictEqual(web3.toBigNumber(hashedMove2).toNumber(), 0,
+                    "game move2Hash not returned"))
+                .then(() => instance.gameMove2(gameHash))
+                .then(gameMove2 => assert.strictEqual(gameMove2.toNumber(), VOID, "game move2 not VOID"));
         });
-        it("should have emitted LogCreation event", function() {
+        it("should have emitted LogGameCreated event", function() {
             this.slow(slowDuration);
 
-            return web3.eth.getTransactionReceiptMined(instance.transactionHash)
-                .then(function(receipt) {
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(txObj => web3.eth.getTransactionReceiptMined(txObj.tx))
+                .then(receipt => {
                     const EXPECTED_TOPIC_LENGTH = 4;
-                    assert.equal(receipt.logs.length, 1); // just 1 LogCreation event
+                    assert.equal(receipt.logs.length, 1); // just 1 LogGameCreated event
 
                     const logEvent = receipt.logs[0];
-                    assert.equal(logEvent.topics[0], web3.sha3("LogCreation(address,uint256,uint256)"));
+                    assert.equal(logEvent.topics[0], web3.sha3("LogGameCreated(address,address,bytes32,uint256,uint256)"));
                     assert.equal(logEvent.topics.length, EXPECTED_TOPIC_LENGTH);
 
-                    const EXPECTED_ARGS_LENGTH = 3;
-                    const formattedEvent = instance.LogCreation().formatter(logEvent);
+                    const EXPECTED_ARGS_LENGTH = 5;
+                    const formattedEvent = instance.LogGameCreated().formatter(logEvent);
                     const name = formattedEvent.event;
-                    const ownerArg = formattedEvent.args.owner;
+                    const player1Arg = formattedEvent.args.player1;
+                    const player2Arg = formattedEvent.args.player2;
+                    const gameHashArg = formattedEvent.args.gameHash;
                     const gamePriceArg = formattedEvent.args.gamePrice;
                     const gameTimeoutArg = formattedEvent.args.gameTimeoutBlocks;
-                    assert.equal(name, "LogCreation", "LogCreation name is wrong");
-                    assert.equal(ownerArg, owner, "LogCreation arg owner is wrong: " + ownerArg);
-                    assert.equal(gamePriceArg, GAME_PRICE, "LogCreation arg game price is wrong: " + gamePriceArg);
-                    assert.equal(gameTimeoutArg, GAME_TIMEOUT, "LogCreation arg game timeout is wrong: " + gameTimeoutArg);
+                    assert.strictEqual(name, "LogGameCreated", "LogGameCreated name is wrong");
+                    assert.strictEqual(player1Arg, player1, "LogGameCreated arg player1 is wrong: " + player1Arg);
+                    assert.strictEqual(player2Arg, player2, "LogGameCreated arg player2 is wrong: " + player2Arg);
+                    assert.strictEqual(gameHashArg, gameHash, "LogGameCreated arg gameHash is wrong: " + gameHashArg);
+                    assert.equal(gamePriceArg.toNumber(), GAME_PRICE.toNumber(),
+                        "LogGameCreated arg game price is wrong: " + gamePriceArg);
+                    assert.equal(gameTimeoutArg.toNumber(), GAME_TIMEOUT,
+                        "LogGameCreated arg game timeout is wrong: " + gameTimeoutArg);
                     assert.equal(Object.keys(formattedEvent.args).length, EXPECTED_ARGS_LENGTH);
                 });
         });
     });
 
-    describe("#enrol()", function() {
-        it("should fail if two players are already registered", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(function() {
-                    return web3.eth.expectedExceptionPromise(
-                        function() {
-                            return instance.enrol({ from: player3, gas: MAX_GAS, value: GAME_PRICE });
-                        },
-                        MAX_GAS
-                    );
-                });
-        });
-        it("should fail if player is already registered", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(function() {
-                    return web3.eth.expectedExceptionPromise(
-                        function() {
-                            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE });
-                        },
-                        MAX_GAS
-                    );
-                });
-        });
-        it("should fail if player does send zero value", function() {
+    describe("#joinGame()", function() {
+        it("should fail if game hash is zero", function() {
             this.slow(slowDuration);
 
             return web3.eth.expectedExceptionPromise(
                 function() {
-                    return instance.enrol({ from: player1, gas: MAX_GAS, value: 0 });
+                    return instance.joinGame(0, ROCK, { from: player2, gas: MAX_GAS, value: GAME_PRICE });
                 },
                 MAX_GAS
             );
         });
-        it("should fail if player does not send at least game price", function() {
+        it("should fail if game move is VOID", function() {
             this.slow(slowDuration);
 
-            return web3.eth.expectedExceptionPromise(
-                function() {
-                    return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE - 1 });
-                },
-                MAX_GAS
-            );
-        });
-        it("should register the first player", function() {
-            this.slow(slowDuration);
-
-            return web3.eth.expectedOkPromise(
-                function() {
-                    return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE });
-                },
-                MAX_GAS
-            )
-            .then(() => instance.bet1())
-            .then(bet1 => {
-                assert.strictEqual(bet1[0], player1, "player1 not returned");
-                return instance.canPlayAs(player1);
-            })
-            .then(betId => assert.isTrue(betId == 1, "player1 cannot play as bet1"));
-        });
-        it("should return correct betId for the first player", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol.call({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(betId => assert.strictEqual(betId.toNumber(), 1, "betId not equal to 1"));
-        });
-        it("should register the second player", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(function() {
-                    return web3.eth.expectedOkPromise(
-                        function() {
-                            return instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE });
-                        },
-                        MAX_GAS
-                    )
-                    .then(() => instance.bet2())
-                    .then(bet2 => {
-                        assert.strictEqual(bet2[0], player2, "player2 not returned");
-                        return instance.canPlayAs(player2);
-                    })
-                    .then(betId => assert.isTrue(betId == 2, "player2 cannot play as bet2"));
-                });
-        });
-        it("should return correct betId for the second player", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol.call({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(betId => assert.strictEqual(betId.toNumber(), 2, "betId not equal to 2"));
-        });
-        it("should have emitted LogEnrol event", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(txObj => {
-                    assert.equal(txObj.logs.length, 1); // just 1 LogEnrol event
-                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogEnrol event
-
-                    const EXPECTED_ARG_LENGTH = 2;
-                    const txLogEvent = txObj.logs[0];
-                    const eventName = txLogEvent.event;
-                    const callerArg = txLogEvent.args.caller;
-                    const betIdArg = txLogEvent.args.betId;
-                    assert.equal(eventName, "LogEnrol", "LogEnrol event name is wrong");
-                    assert.equal(callerArg, player1, "LogEnrol arg caller is wrong: " + callerArg);
-                    assert.equal(betIdArg, 1, "LogEnrol arg betId is wrong: " + betIdArg);
-
-                    const EXPECTED_TOPIC_LENGTH = 3;
-                    const receiptRawLogEvent = txObj.receipt.logs[0];
-                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogEnrol(address,uint256)"));
-                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
-
-                    const receiptLogEvent = instance.LogEnrol().formatter(receiptRawLogEvent);
-                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogEnrol receipt event is different from tx event");
-                });
-        });
-    });
-
-    describe("#play()", function() {
-        it("should fail if sender cannot play", function() {
-            this.slow(slowDuration);
-
-            let moveHash;
+            let move1Hash, gameHash;
             return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
-                .then(_moveHash => {
-                    moveHash = _moveHash;
-
-                    return web3.eth.expectedExceptionPromise(
-                        function() {
-                            return instance.play(moveHash, { from: player1, gas: MAX_GAS });
-                        },
-                        MAX_GAS
-                    );
-                });
-        });
-        it("should store the first player's bet", function() {
-            this.slow(slowDuration);
-
-            let moveHash;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(_moveHash => {
-                    moveHash = _moveHash;
-                    
-                    return web3.eth.expectedOkPromise(
-                        function() {
-                            return instance.play(moveHash, { from: player1, gas: MAX_GAS });
-                        },
-                        MAX_GAS
-                    )
-                    .then(() => instance.bet1())
-                    .then(bet1 => {
-                        assert.strictEqual(bet1[0], player1, "player1 not stored");
-                        assert.strictEqual(bet1[1], moveHash, "player1 moveHash not stored");
-                    })
-                    .then(() => instance.canRevealAs(player1))
-                    .then(betId => {
-                        assert.isTrue(betId == 1, "player1 cannot reveal as bet1");
-                        return instance.canRevealAs(player2);
-                    })
-                    .then(betId => {
-                        assert.isTrue(betId == 0, "player2 cannot reveal");
-                        return instance.isGameOver();
-                    })
-                    .then(gameOver => assert.isFalse(gameOver, "gameOver is false"));
-                });
-        });
-        it("should store the second player's bet", function() {
-            this.slow(slowDuration);
-            
-            let moveHash;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => {
-                    moveHash = move2Hash;
-                    
-                    return web3.eth.expectedOkPromise(
-                        function() {
-                            return instance.play(moveHash, { from: player2, gas: MAX_GAS });
-                        },
-                        MAX_GAS
-                    )
-                    .then(() => instance.bet2())
-                    .then(bet2 => {
-                        assert.strictEqual(bet2[0], player2, "player2 not stored");
-                        assert.strictEqual(bet2[1], moveHash, "player2 moveHash not stored");
-                    })
-                    .then(() => instance.canRevealAs(player1))
-                    .then(betId => {
-                        assert.isTrue(betId == 1, "player1 cannot reveal as bet1");
-                        return instance.canRevealAs(player2);
-                    })
-                    .then(betId => {
-                        assert.isTrue(betId == 2, "player2 cannot reveal as bet2");
-                        return instance.isGameOver();
-                    })
-                    .then(gameOver => assert.isFalse(gameOver, "gameOver is false"));
-                });
-        });
-        it("should have emitted LogPlay event", function() {
-            this.slow(slowDuration);
-
-            let moveHash;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(_moveHash => {
-                    moveHash = _moveHash;
-                    return instance.play(moveHash, { from: player1, gas: MAX_GAS });
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 })
-                .then(txObj => {
-                    assert.equal(txObj.logs.length, 1); // just 1 LogPlay event
-                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogPlay event
-
-                    const EXPECTED_ARG_LENGTH = 3;
-                    const txLogEvent = txObj.logs[0];
-                    const eventName = txLogEvent.event;
-                    const callerArg = txLogEvent.args.caller;
-                    const betIdArg = txLogEvent.args.betId;
-                    const moveHashArg = txLogEvent.args.moveHash;
-                    assert.strictEqual(eventName, "LogPlay", "LogPlay event name is wrong");
-                    assert.strictEqual(callerArg, player1, "LogPlay arg caller is wrong: " + callerArg);
-                    assert.strictEqual(betIdArg.toNumber(), 1, "LogPlay arg betId is wrong: " + betIdArg);
-                    assert.strictEqual(moveHashArg, moveHash, "LogPlay arg moveHash is wrong: " + moveHashArg);
-
-                    const EXPECTED_TOPIC_LENGTH = 4;
-                    const receiptRawLogEvent = txObj.receipt.logs[0];
-                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogPlay(address,uint256,bytes32)"));
-                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
-
-                    const receiptLogEvent = instance.LogPlay().formatter(receiptRawLogEvent);
-                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogPlay receipt event is different from tx event");
-                });
-        });
-    });
-
-    describe("#reveal()", function() {
-        it("should fail if sender cannot reveal", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.joinGame(gameHash, VOID,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game move is out of range", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.joinGame(gameHash, 4,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if the game is over because both moves were made", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return instance.joinGame(gameHash, PAPER,
+                        { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.joinGame(gameHash, PAPER,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if the game is over because timeout has expired", function() {
+            this.slow(slowDuration);
+            
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => web3.eth.getBlockPromise('latest'))
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.joinGame(gameHash, PAPER,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if second player does send zero value", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if second player does not send at least game price", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.joinGame(gameHash, PAPER,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE.minus(1) });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game has not been started yet", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    const gameHash = Web3Utils.soliditySha3(player1, player2);
+
+                    return instance.joinGame(gameHash, PAPER,
+                        { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                },
+                MAX_GAS
+            );
+        });
+        it("should register the second player move", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => {
+                    return web3.eth.expectedOkPromise(
+                        function() {
+                            return instance.joinGame(gameHash, PAPER,
+                                { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                        },
+                        MAX_GAS
+                    );
+                })
+                .then(() => instance.gameMove2(gameHash))
+                .then(move2 => assert.strictEqual(move2.toNumber(), PAPER,
+                    "second player move not registered"));
+        });
+        it("should have emitted LogGameJoined event", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(txObj => web3.eth.getTransactionReceiptMined(txObj.tx))
+                .then(receipt => {
+                    const EXPECTED_TOPIC_LENGTH = 4;
+                    assert.equal(receipt.logs.length, 1); // just 1 LogGameJoined event
+
+                    const logEvent = receipt.logs[0];
+                    assert.equal(logEvent.topics[0], web3.sha3("LogGameJoined(address,address,bytes32,uint8)"));
+                    assert.equal(logEvent.topics.length, EXPECTED_TOPIC_LENGTH);
+
+                    const EXPECTED_ARGS_LENGTH = 4;
+                    const formattedEvent = instance.LogGameJoined().formatter(logEvent);
+                    const name = formattedEvent.event;
+                    const player1Arg = formattedEvent.args.player1;
+                    const player2Arg = formattedEvent.args.player2;
+                    const gameHashArg = formattedEvent.args.gameHash;
+                    const move2Arg = formattedEvent.args.move2;
+                    assert.strictEqual(name, "LogGameJoined", "LogGameJoined name is wrong");
+                    assert.strictEqual(player1Arg, player1, "LogGameJoined arg player1 is wrong: " + player1Arg);
+                    assert.strictEqual(player2Arg, player2, "LogGameJoined arg player2 is wrong: " + player2Arg);
+                    assert.strictEqual(gameHashArg, gameHash, "LogGameJoined arg gameHash is wrong: " + gameHashArg);
+                    assert.equal(move2Arg.toNumber(), PAPER, "LogGameJoined arg move2 is wrong: " + move2Arg);
+                    assert.equal(Object.keys(formattedEvent.args).length, EXPECTED_ARGS_LENGTH);
+                });
+        });
+    });
+
+    describe("#revealGame()", function() {
+        it("should fail if game hash is zero", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(0, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game move is VOID", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game move is out of range", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, 4, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if the game is over because both moves were made", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET,
+                                { from: player2, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if the game is over because timeout has expired", function() {
+            this.slow(slowDuration);
+            
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => web3.eth.getBlockPromise('latest'))
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET,
+                                { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game has not been started yet", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    const gameHash = Web3Utils.soliditySha3(player1, player2);
+
+                    return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                },
+                MAX_GAS
+            );
+        });
+        it("should fail if player2 has not yet arrived after timeout", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => web3.eth.getBlockPromise('latest'))
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -426,16 +681,23 @@ contract('RockPaperScissors', function(accounts) {
         it("should fail if passed move is invalid", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, 4, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(4, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.revealGame(gameHash, 4, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -444,16 +706,48 @@ contract('RockPaperScissors', function(accounts) {
         it("should fail if passed move is void", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.revealGame(gameHash, VOID, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if passed move and secret do not match hash because of sender", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player2, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -461,17 +755,24 @@ contract('RockPaperScissors', function(accounts) {
         });
         it("should fail if passed move and secret do not match hash because of move", function() {
             this.slow(slowDuration);
-        
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            return instance.revealGame(gameHash, SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -479,102 +780,50 @@ contract('RockPaperScissors', function(accounts) {
         });
         it("should fail if passed move and secret do not match hash because of secret", function() {
             this.slow(slowDuration);
-        
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.reveal(SCISSORS, "aaa", { from: player1, gas: MAX_GAS });
+                            return instance.revealGame(gameHash, ROCK, PLAYER2_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
                 });
         });
-        it("should store the game start block", function() {
+        it("should fail if move is revealed multiple times", function() {
             this.slow(slowDuration);
 
-            let gameStartBlock;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.gameStartBlock())
-                .then(_gameStartBlock => {
-                    gameStartBlock = _gameStartBlock;
-                    return web3.eth.getBlock('latest');
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 })
-                .then(block => assert.strictEqual(block.number, gameStartBlock.toNumber(),
-                    "game start block is not latest block number"));
-        });
-        it("should store each move in clear", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.bet1())
-                .then(bet1 => assert.strictEqual(bet1[2].toNumber(), ROCK, "move1 not stored in clear"))
-                .then(() => instance.bet2())
-                .then(bet2 => assert.strictEqual(bet2[2].toNumber(), PAPER, "move2 not stored in clear"));
-        });
-        it("should have emitted LogReveal event", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(moveHash => instance.play(moveHash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(txObj => {
-                    assert.equal(txObj.logs.length, 1); // just 1 LogReveal event
-                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogReveal event
-
-                    const EXPECTED_ARG_LENGTH = 3;
-                    const txLogEvent = txObj.logs[0];
-                    const eventName = txLogEvent.event;
-                    const callerArg = txLogEvent.args.caller;
-                    const betIdArg = txLogEvent.args.betId;
-                    const moveArg = txLogEvent.args.move;
-                    assert.equal(eventName, "LogReveal", "LogReveal event name is wrong");
-                    assert.equal(callerArg, player1, "LogReveal arg caller is wrong: " + callerArg);
-                    assert.equal(betIdArg, 1, "LogReveal arg betId is wrong: " + betIdArg);
-                    assert.equal(moveArg, 1, "LogReveal arg move is wrong: " + moveArg);
-
-                    const EXPECTED_TOPIC_LENGTH = 4;
-                    const receiptRawLogEvent = txObj.receipt.logs[0];
-                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogReveal(address,uint256,uint256)"));
-                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
-
-                    const receiptLogEvent = instance.LogReveal().formatter(receiptRawLogEvent);
-                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogReveal receipt event is different from tx event");
-                });
-        });
-    });
-
-    describe("#chooseWinner()", function() {
-        it("should fail if game is not over", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => {
                     return web3.eth.expectedExceptionPromise(
                         function() {
-                            return instance.chooseWinner({ from: owner, gas: MAX_GAS });
+                            return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                         },
                         MAX_GAS
                     );
@@ -593,20 +842,28 @@ contract('RockPaperScissors', function(accounts) {
                     it(`should forbid move1 ${move1} and move2 ${move2}`, function() {
                         this.slow(slowDuration);
 
-                        return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                            .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                            .then(() => instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                            .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                            .then(() => instance.hash(player2, move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                            .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
+                        let move1Hash, gameHash;
+                        return instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                            .then(_move1Hash => {
+                                move1Hash = _move1Hash;
+                                return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                    { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                            })
+                            .then(_gameHash => {
+                                gameHash = _gameHash;
+                                return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                    { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                            })
                             .then(() => {
                                 return web3.eth.expectedExceptionPromise(
                                     function() {
-                                        return instance.reveal(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
-                                            .then(() => instance.reveal(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }));
+                                        return instance.joinGame(gameHash, move2,
+                                            { from: player2, gas: MAX_GAS, value: GAME_PRICE })
+                                                .then(() => instance.revealGame(gameHash, move1, PLAYER1_SECRET,
+                                                    { from: player1, gas: MAX_GAS }));
                                     },
                                     MAX_GAS
-                                );                                
+                                );
                             });
                     });
                 });
@@ -623,119 +880,47 @@ contract('RockPaperScissors', function(accounts) {
                     it(`should allow move1 ${move1} and move2 ${move2} with winner ${winner}`, function() {
                         this.slow(slowDuration);
 
-                        return web3.eth.expectedOkPromise(
-                            function() {
-                                return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                                    .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                                    .then(() => instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                                    .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                                    .then(() => instance.hash(player2, move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                                    .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                                    .then(() => instance.reveal(move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                                    .then(() => instance.reveal(move2, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                                    .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }));
-                            },
-                            MAX_GAS
-                        )
-                        .then(() => instance.winnerId())
-                        .then(winnerId => {
-                            assert.equal(winnerId.toNumber(), winner, `game winner is not ${winner} with [${move1}, ${move2}]`);
-                            return winnerId;
-                        });
+                        let move1Hash, gameHash, winnerId;
+                        return instance.hash(player1, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                            .then(_move1Hash => {
+                                move1Hash = _move1Hash;
+                                return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                    { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                            })
+                            .then(_gameHash => {
+                                gameHash = _gameHash;
+                                return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                                    { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                            })
+                            .then(() => instance.joinGame(gameHash, move2, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                            .then(() => instance.revealGame.call(gameHash, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                            .then(_winnerId => {
+                                winnerId = _winnerId;
+                                return instance.revealGame(gameHash, move1, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                            })
+                            .then(() => {
+                                assert.equal(winnerId.toNumber(), winner, `winner is not ${winner} with [${move1}, ${move2}]`);
+                            });
                     });
                 });
             });
         });
-        it("should choose no winner if player2 does not enrol before timeout", function() {
+        it("should assign the award to the winner", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 0, "game is not draw"));
-        });
-        it("should choose no winner if player2 does not play before timeout", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 0, "game is not draw"));
-        });
-        it("should choose no winner if player1 does not enrol before timeout", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 0, "game is not draw"));
-        });
-        it("should choose no winner if player1 does not play before timeout", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 0, "game is not draw"));
-        });
-        it("should choose player1 as winner if player2 does not reveal before timeout", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(PAPER, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.equal(winnerId, 1, "game winner is not player1"));
-        });
-        it("should choose player2 as winner if player1 does not reveal before timeout", function() {
-            this.slow(slowDuration);
-
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, SCISSORS, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.winnerId())
-                .then(winnerId => assert.equal(winnerId, 2, "game winner is not player2"));
-        });
-        it("should transfer the award to the winner", function() {
-            this.slow(slowDuration);
-
-            let balance1Before, balance2Before;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+            let move1Hash, gameHash, balance1Before, balance2Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => instance.balances(player1))
                 .then(_balance1Before => {
                     balance1Before = _balance1Before;
@@ -743,35 +928,40 @@ contract('RockPaperScissors', function(accounts) {
                 })
                 .then(_balance2Before => {
                     balance2Before = _balance2Before;
-                    return instance.chooseWinner({ from: owner, gas: MAX_GAS });
+                    return instance.revealGame.call(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                 })
-                .then(() => instance.winnerId())
                 .then(winnerId => {
-                    assert.equal(winnerId, 2, "game winner is not player2");
-                    return instance.balances(player1);
+                    assert.strictEqual(winnerId.toNumber(), 2, "game winner is not player2");
+                    return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                 })
+                .then(() => instance.balances(player1))
                 .then(_balance1After => {
                     const balance1Delta = _balance1After.minus(balance1Before);
-                    assert.equal(balance1Delta, 0, "player1 balance delta is not zero");
+                    assert.strictEqual(balance1Delta.toNumber(), 0, "player1 balance delta is not zero");
                     return instance.balances(player2);
                 })
                 .then(_balance2After => {
                     const balance2Delta = _balance2After.minus(balance2Before);
-                    assert.equal(balance2Delta, 2 * GAME_PRICE, "player2 balance delta is not equal to the award");
+                    assert.strictEqual(balance2Delta.toNumber(), 2 * GAME_PRICE,
+                        "player2 balance delta is not equal to the award");
                 });
         });
         it("should divide the award if the game is a draw", function() {
             this.slow(slowDuration);
 
-            let balance1Before, balance2Before;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
+            let move1Hash, gameHash, balance1Before, balance2Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, ROCK, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
                 .then(() => instance.balances(player1))
                 .then(_balance1Before => {
                     balance1Before = _balance1Before;
@@ -779,142 +969,216 @@ contract('RockPaperScissors', function(accounts) {
                 })
                 .then(_balance2Before => {
                     balance2Before = _balance2Before;
-                    return instance.chooseWinner({ from: owner, gas: MAX_GAS });
+                    return instance.revealGame.call(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                 })
-                .then(() => instance.winnerId())
                 .then(winnerId => {
-                    assert.equal(winnerId, 0, "game is not a draw");
-                    return instance.balances(player1);
+                    assert.strictEqual(winnerId.toNumber(), 0, "game winner is not empty");
+                    return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
                 })
+                .then(() => instance.balances(player1))
                 .then(_balance1After => {
                     const balance1Delta = _balance1After.minus(balance1Before);
-                    assert.equal(balance1Delta, GAME_PRICE, "player1 balance delta is not equal to half the award");
+                    assert.strictEqual(balance1Delta.toNumber(), 1*GAME_PRICE, "player1 balance delta is not its wager");
                     return instance.balances(player2);
                 })
                 .then(_balance2After => {
                     const balance2Delta = _balance2After.minus(balance2Before);
-                    assert.equal(balance2Delta, GAME_PRICE, "player2 balance delta is not equal to half the award");
-                });
-        });
-        it("should return its wager to first player if another one does not enrol before timeout", function() {
-            this.slow(slowDuration);
-
-            let balance1Before;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.balances(player1))
-                .then(_balance1Before => {
-                    balance1Before = _balance1Before;
-                    return instance.chooseWinner({ from: owner, gas: MAX_GAS });
-                })
-                .then(() => instance.balances(player1))
-                .then(_balance1After => {
-                    const balance1Delta = _balance1After.minus(balance1Before);
-                    assert.equal(balance1Delta, GAME_PRICE, "player1 wager not returned after missing enrol");
-                });
-        });
-        it("should return its wager to player1 if player2 does not play before timeout", function() {
-            this.slow(slowDuration);
-
-            let balance1Before;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.balances(player1))
-                .then(_balance1Before => {
-                    balance1Before = _balance1Before;
-                    return instance.chooseWinner({ from: owner, gas: MAX_GAS });
-                })
-                .then(() => instance.balances(player1))
-                .then(_balance1After => {
-                    const balance1Delta = _balance1After.minus(balance1Before);
-                    assert.equal(balance1Delta, GAME_PRICE, "player1 wager not returned after missing play");
-                });
-        });
-        it("should return its wager to player2 if player1 does not play before timeout", function() {
-            this.slow(slowDuration);
-
-            let balance2Before;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.gameStartBlock())
-                .then(gameStartBlock => web3.eth.getPastBlock(gameStartBlock.plus(GAME_TIMEOUT)))
-                .then(() => instance.balances(player2))
-                .then(_balance2Before => {
-                    balance2Before = _balance2Before;
-                    return instance.chooseWinner({ from: owner, gas: MAX_GAS });
-                })
-                .then(() => instance.balances(player2))
-                .then(_balance2After => {
-                    const balance2Delta = _balance2After.minus(balance2Before);
-                    assert.equal(balance2Delta, GAME_PRICE, "player2 wager not returned after missing play");
+                    assert.strictEqual(balance2Delta.toNumber(), 1*GAME_PRICE, "player2 balance delta is not its wager");
                 });
         });
         it("should reset the bets after winner chosen", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(PAPER, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(() => instance.bet1())
-                .then(bet1 => {
-                    assert.strictEqual(bet1[0], '0x0000000000000000000000000000000000000000', "bet1 player not reset");
-                    assert.equal(bet1[2], VOID, "bet1 move not reset");
+            let move1Hash, gameHash, balance1Before, balance2Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 })
-                .then(() => instance.bet2())
-                .then(bet2 => {
-                    assert.strictEqual(bet2[0], '0x0000000000000000000000000000000000000000', "bet2 player not reset");
-                    assert.equal(bet2[2], VOID, "bet2 move not reset");
-                });
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.gameMoveHash1(gameHash))
+                .then(moveHash1 => {
+                    assert.strictEqual(moveHash1, '0x0000000000000000000000000000000000000000000000000000000000000000',
+                        "game moveHash1 not reset");
+                    return instance.gameMove1(gameHash);
+                })
+                .then(move1 => {
+                    assert.strictEqual(move1.toNumber(), VOID, "game move1 not reset");
+                    return instance.gameMoveHash2(gameHash);
+                })
+                .then(moveHash2 => {
+                    assert.strictEqual(moveHash2, '0x0000000000000000000000000000000000000000000000000000000000000000',
+                        "game moveHash2 not reset");
+                    return instance.gameMove2(gameHash);
+                })
+                .then(move2 => assert.strictEqual(move2.toNumber(), VOID, "game move2 not reset"));
         });
-        it("should have emitted LogChooseWinner event", function() {
+        it("should have emitted LogGameRevealed event", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
-                .then(txObj => {
-                    assert.equal(txObj.logs.length, 1); // just 1 LogChooseWinner event
-                    assert.equal(txObj.receipt.logs.length, 1); // just 1 LogChooseWinner event
+            let move1Hash, gameHash, winnerId;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame.call(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(_winnerId => {
+                    winnerId = _winnerId;
+                    return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                })
+                .then(txObj => web3.eth.getTransactionReceiptMined(txObj.tx))
+                .then(receipt => {
+                    const EXPECTED_TOPIC_LENGTH = 4;
+                    assert.equal(receipt.logs.length, 1); // just 1 LogGameRevealed event
 
-                    const EXPECTED_ARG_LENGTH = 2;
-                    const txLogEvent = txObj.logs[0];
-                    const eventName = txLogEvent.event;
-                    const callerArg = txLogEvent.args.caller;
-                    const winnerIdArg = txLogEvent.args.winnerId;
-                    assert.equal(eventName, "LogChooseWinner", "LogChooseWinner event name is wrong");
-                    assert.equal(callerArg, owner, "LogChooseWinner arg caller is wrong: " + callerArg);
-                    assert.equal(winnerIdArg, 0, "LogChooseWinner arg winnerId is wrong: " + winnerIdArg);
+                    const logEvent = receipt.logs[0];
+                    assert.equal(logEvent.topics[0], web3.sha3("LogGameRevealed(address,address,bytes32,uint8,uint256)"));
+                    assert.equal(logEvent.topics.length, EXPECTED_TOPIC_LENGTH);
 
-                    const EXPECTED_TOPIC_LENGTH = 3;
-                    const receiptRawLogEvent = txObj.receipt.logs[0];
-                    assert.equal(receiptRawLogEvent.topics[0], web3.sha3("LogChooseWinner(address,uint256)"));
-                    assert.equal(receiptRawLogEvent.topics.length, EXPECTED_TOPIC_LENGTH);
-
-                    const receiptLogEvent = instance.LogChooseWinner().formatter(receiptRawLogEvent);
-                    assert.deepEqual(receiptLogEvent, txLogEvent, "LogChooseWinner receipt event is different from tx event");
+                    const EXPECTED_ARGS_LENGTH = 5;
+                    const formattedEvent = instance.LogGameRevealed().formatter(logEvent);
+                    const name = formattedEvent.event;
+                    const player1Arg = formattedEvent.args.player1;
+                    const player2Arg = formattedEvent.args.player2;
+                    const gameHashArg = formattedEvent.args.gameHash;
+                    const move1Arg = formattedEvent.args.move1;
+                    const winnerIdArg = formattedEvent.args.winnerId;
+                    assert.strictEqual(name, "LogGameRevealed", "LogGameRevealed name is wrong");
+                    assert.strictEqual(player1Arg, player1, "LogGameRevealed arg player1 is wrong: " + player1Arg);
+                    assert.strictEqual(player2Arg, player2, "LogGameRevealed arg player2 is wrong: " + player2Arg);
+                    assert.strictEqual(gameHashArg, gameHash, "LogGameRevealed arg gameHash is wrong: " + gameHashArg);
+                    assert.strictEqual(move1Arg.toNumber(), ROCK, "LogGameRevealed arg move1 is wrong: " + move1Arg);
+                    assert.strictEqual(winnerIdArg.toNumber(), winnerId.toNumber(),
+                        "LogGameRevealed arg winnerId is wrong: " + winnerIdArg);
+                    assert.equal(Object.keys(formattedEvent.args).length, EXPECTED_ARGS_LENGTH);
                 });
         });
     });
 
+    describe("#claimGame()", function() {
+        it("should outcome player1 as winner if player2 does not show before timeout", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance1Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.balances(player1))
+                .then(_balance1Before => {
+                    balance1Before = _balance1Before;
+                    return web3.eth.getBlockPromise('latest');
+                })
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => instance.claimGame.call(gameHash, { from: player1, gas: MAX_GAS }))
+                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 0, "game outcome is not a draw"));
+        });
+        it("should outcome player2 as winner if player1 does not reveal before timeout", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance1Before, balance2Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, ROCK, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.balances(player1))
+                .then(_balance1Before => {
+                    balance1Before = _balance1Before;
+                    return web3.eth.getBlockPromise('latest');
+                })
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => instance.claimGame.call(gameHash, { from: player2, gas: MAX_GAS }))
+                .then(winnerId => assert.strictEqual(winnerId.toNumber(), 2, "game outcome is not player2"));
+        });
+        it("should return its wager to player1 if another one does not show before timeout", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance1Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.balances(player1))
+                .then(_balance1Before => {
+                    balance1Before = _balance1Before;
+                    return web3.eth.getBlockPromise('latest');
+                })
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => instance.claimGame(gameHash, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.balances(player1))
+                .then(_balance1After => {
+                    const balance1Delta = _balance1After.minus(balance1Before);
+                    assert.strictEqual(balance1Delta.toNumber(), 1*GAME_PRICE, "player1 balance delta is not its wager");
+                });
+        });
+        it("should return award to player2 if player1 does not reveal before timeout", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance2Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, PAPER, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.balances(player2))
+                .then(_balance2Before => {
+                    balance2Before = _balance2Before;
+                    return web3.eth.getBlockPromise('latest');
+                })
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => instance.claimGame(gameHash, { from: player2, gas: MAX_GAS }))
+                .then(() => instance.balances(player2))
+                .then(_balance2After => {
+                    const balance2Delta = _balance2After.minus(balance2Before);
+                    assert.strictEqual(balance2Delta.toNumber(), 2*GAME_PRICE, "player2 balance delta is not its wager");
+                });
+        });
+    });
+    
     describe("#withdraw()", function() {
         it("should fail if caller deposit is zero", function() {
             this.slow(slowDuration);
@@ -930,38 +1194,47 @@ contract('RockPaperScissors', function(accounts) {
                     );
                 });
         });
-        it("should clear caller deposit", function() {
+        it("should clear the caller deposit", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, SCISSORS, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.balances(player1))
+                .then(balance1 => assert.strictEqual(balance1.toNumber(), 2 * GAME_PRICE,
+                    "player1 balance not equal to winner award"))
                 .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
                 .then(() => instance.balances(player1))
-                .then(balance1 => assert.equal(balance1, 0, "player1 balance not zero"))
-                .then(() => instance.withdraw({ from: player2, gas: MAX_GAS }))
-                .then(() => instance.balances(player2))
-                .then(balance2 => assert.equal(balance2, 0, "player2 balance not zero"));
+                .then(balance1 => assert.strictEqual(balance1.toNumber(), 0, "player1 balance not zero"));
         });
-        it("should increase caller balance", function() {
+        it("should increase the caller balance", function() {
             this.slow(slowDuration);
 
-            let balance1Before, balance2Before, txObj, gasPrice, withdraw1TxCost, withdraw2TxCost;
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+            let move1Hash, gameHash, balance1Before, balance2Before, txObj, gasPrice, withdraw1TxCost, withdraw2TxCost;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, SCISSORS, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
                 .then(() => web3.eth.getBalancePromise(player1))
                 .then(balance1 => balance1Before = balance1)
                 .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
@@ -976,37 +1249,29 @@ contract('RockPaperScissors', function(accounts) {
                 })
                 .then(balance1 => {
                     const balance1Diff = balance1.minus(balance1Before).plus(withdraw1TxCost);
-                    assert.equal(balance1Diff, GAME_PRICE, "player1 balance not increased")
-                })
-                .then(() => web3.eth.getBalancePromise(player2))
-                .then(balance2 => balance2Before = balance2)
-                .then(() => instance.withdraw({ from: player2, gas: MAX_GAS }))
-                .then(_txObj => {
-                    txObj = _txObj;
-                    return web3.eth.getTransactionPromise(txObj.tx);
-                })
-                .then(tx => {
-                    gasPrice = tx.gasPrice;
-                    withdraw2TxCost = gasPrice * txObj.receipt.gasUsed;
-                    return web3.eth.getBalancePromise(player2);
-                })
-                .then(balance2 => {
-                    const balance2Diff = balance2.minus(balance2Before).plus(withdraw2TxCost);
-                    assert.equal(balance2Diff, GAME_PRICE, "player2 balance not increased")
+                    assert.strictEqual(balance1Diff.toNumber(), 2 * GAME_PRICE, "player1 balance not increased")
                 });
         });
         it("should have emitted LogWithdraw event", function() {
             this.slow(slowDuration);
 
-            return instance.enrol({ from: player1, gas: MAX_GAS, value: GAME_PRICE })
-                .then(() => instance.enrol({ from: player2, gas: MAX_GAS, value: GAME_PRICE }))
-                .then(() => instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(move1Hash => instance.play(move1Hash, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.hash(player2, SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(move2Hash => instance.play(move2Hash, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.reveal(ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
-                .then(() => instance.reveal(SCISSORS, PLAYER2_SECRET, { from: player2, gas: MAX_GAS }))
-                .then(() => instance.chooseWinner({ from: owner, gas: MAX_GAS }))
+            let move1Hash, gameHash;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.joinGame(gameHash, SCISSORS, { from: player2, gas: MAX_GAS, value: GAME_PRICE }))
+                .then(() => instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS }))
+                .then(() => instance.balances(player1))
+                .then(balance1 => assert.strictEqual(balance1.toNumber(), GAME_PRICE * 2,
+                    "player1 balance not equal to winner award"))
                 .then(() => instance.withdraw({ from: player1, gas: MAX_GAS }))
                 .then(txObj => {
                     assert.isAtMost(txObj.logs.length, txObj.receipt.logs.length);
