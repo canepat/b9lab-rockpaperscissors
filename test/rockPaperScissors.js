@@ -209,9 +209,6 @@ contract('RockPaperScissors', function(accounts) {
                 .then(gameMove1 => assert.strictEqual(gameMove1.toNumber(), VOID, "game move1 not VOID"))
                 .then(() => instance.gamePlayer2(gameHash))
                 .then(gamePlayer2 => assert.strictEqual(gamePlayer2, player2, "game player2 not returned"))
-                .then(() => instance.gameMoveHash2(gameHash))
-                .then(hashedMove2 => assert.strictEqual(web3.toBigNumber(hashedMove2).toNumber(), 0,
-                    "game move2Hash not returned"))
                 .then(() => instance.gameMove2(gameHash))
                 .then(gameMove2 => assert.strictEqual(gameMove2.toNumber(), VOID, "game move2 not VOID"));
         });
@@ -267,6 +264,18 @@ contract('RockPaperScissors', function(accounts) {
             return web3.eth.expectedExceptionPromise(
                 function() {
                     return instance.joinGame(0, ROCK, { from: player2, gas: MAX_GAS, value: GAME_PRICE });
+                },
+                MAX_GAS
+            );
+        });
+        it("should fail if game has not been started yet", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    const gameHash = Web3Utils.soliditySha3(player1, player2);
+
+                    return instance.joinGame(gameHash, ROCK, { from: player2, gas: MAX_GAS, value: GAME_PRICE });
                 },
                 MAX_GAS
             );
@@ -534,6 +543,18 @@ contract('RockPaperScissors', function(accounts) {
                         MAX_GAS
                     );
                 });
+        });
+        it("should fail if game has not been started yet", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    const gameHash = Web3Utils.soliditySha3(player1, player2);
+
+                    return instance.revealGame(gameHash, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS });
+                },
+                MAX_GAS
+            );
         });
         it("should fail if game move is VOID", function() {
             this.slow(slowDuration);
@@ -1011,11 +1032,6 @@ contract('RockPaperScissors', function(accounts) {
                 })
                 .then(move1 => {
                     assert.strictEqual(move1.toNumber(), VOID, "game move1 not reset");
-                    return instance.gameMoveHash2(gameHash);
-                })
-                .then(moveHash2 => {
-                    assert.strictEqual(moveHash2, '0x0000000000000000000000000000000000000000000000000000000000000000',
-                        "game moveHash2 not reset");
                     return instance.gameMove2(gameHash);
                 })
                 .then(move2 => assert.strictEqual(move2.toNumber(), VOID, "game move2 not reset"));
@@ -1071,6 +1087,74 @@ contract('RockPaperScissors', function(accounts) {
     });
 
     describe("#claimGame()", function() {
+        it("should fail if game hash is zero", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance1Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.balances(player1))
+                .then(_balance1Before => {
+                    balance1Before = _balance1Before;
+                    return web3.eth.getBlockPromise('latest');
+                })
+                .then(latest => web3.eth.getPastBlock(latest.number + GAME_TIMEOUT))
+                .then(() => {
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.claimGame(0, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
+        it("should fail if game has not been started yet", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    const gameHash = Web3Utils.soliditySha3(player1, player2);
+
+                    return instance.claimGame(gameHash, { from: player2, gas: MAX_GAS });
+                },
+                MAX_GAS
+            );
+        });
+        it("should fail if game has not timed out yet", function() {
+            this.slow(slowDuration);
+
+            let move1Hash, gameHash, balance1Before;
+            return instance.hash(player1, ROCK, PLAYER1_SECRET, { from: player1, gas: MAX_GAS })
+                .then(_move1Hash => {
+                    move1Hash = _move1Hash;
+                    return instance.startGame.call(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(_gameHash => {
+                    gameHash = _gameHash;
+                    return instance.startGame(move1Hash, player2, GAME_PRICE, GAME_TIMEOUT,
+                        { from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                })
+                .then(() => instance.balances(player1))
+                .then(_balance1Before => {
+                    balance1Before = _balance1Before;
+                    return web3.eth.expectedExceptionPromise(
+                        function() {
+                            return instance.claimGame(gameHash, { from: player1, gas: MAX_GAS });
+                        },
+                        MAX_GAS
+                    );
+                });
+        });
         it("should outcome player1 as winner if player2 does not show before timeout", function() {
             this.slow(slowDuration);
 
@@ -1120,7 +1204,7 @@ contract('RockPaperScissors', function(accounts) {
                 .then(() => instance.claimGame.call(gameHash, { from: player2, gas: MAX_GAS }))
                 .then(winnerId => assert.strictEqual(winnerId.toNumber(), 2, "game outcome is not player2"));
         });
-        it("should return its wager to player1 if another one does not show before timeout", function() {
+        it("should return its wager to player1 if player2 does not show before timeout", function() {
             this.slow(slowDuration);
 
             let move1Hash, gameHash, balance1Before;
@@ -1351,6 +1435,19 @@ contract('RockPaperScissors', function(accounts) {
                 .then(_move2Hash => {
                     assert.strictEqual(move1Hash, _move2Hash, "Something else is used in hash calculation");
                 });
+        });
+    });
+
+    describe("#()", function() {
+        it("should refuse any ether sent directly", function() {
+            this.slow(slowDuration);
+
+            return web3.eth.expectedExceptionPromise(
+                function() {
+                    return instance.sendTransaction({ from: player1, gas: MAX_GAS, value: GAME_PRICE });
+                },
+                MAX_GAS
+            );
         });
     });
 });

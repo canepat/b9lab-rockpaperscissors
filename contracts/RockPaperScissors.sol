@@ -31,18 +31,15 @@ contract RockPaperScissors {
 
     enum GameMove { VOID, ROCK, PAPER, SCISSORS }
 
-    struct GameBet {
-        address player;
-        bytes32 moveHash;
-        GameMove move;
-    }
-
     struct Game {
         uint256 price;
         uint256 startBlock;
         uint256 timeoutBlocks;
-        GameBet bet1;
-        GameBet bet2;
+        address player1;
+        bytes32 move1Hash;
+        GameMove move1;
+        address player2;
+        GameMove move2;
         uint256 winnerId;
     }
 
@@ -61,14 +58,14 @@ contract RockPaperScissors {
 
         gameHash = keccak256(msg.sender, _player2);
         Game storage newGame = games[gameHash];
-        require(newGame.bet1.player == 0 && newGame.bet2.player == 0);
+        require(newGame.player1 == 0 && newGame.player2 == 0);
 
         newGame.price = _gamePrice;
         newGame.startBlock = block.number;
         newGame.timeoutBlocks = _gameTimeoutBlocks;
-        newGame.bet1.player = msg.sender;
-        newGame.bet1.moveHash = _move1Hash;
-        newGame.bet2.player = _player2;
+        newGame.player1 = msg.sender;
+        newGame.move1Hash = _move1Hash;
+        newGame.player2 = _player2;
         newGame.winnerId = 0;
 
         LogGameCreated(msg.sender, _player2, gameHash, _gamePrice, _gameTimeoutBlocks);
@@ -80,14 +77,16 @@ contract RockPaperScissors {
         require(!isGameOver(_gameHash));
 
         Game storage joinedGame = games[_gameHash];
+        address player1 = joinedGame.player1;
+        address player2 = joinedGame.player2;
         
         require(msg.value == joinedGame.price);
-        require(joinedGame.bet1.player != 0 && joinedGame.bet2.player == msg.sender);
-        require(joinedGame.bet2.move == GameMove.VOID);
+        require(player1 != 0 && player2 == msg.sender);
+        require(joinedGame.move2 == GameMove.VOID);
 
-        joinedGame.bet2.move = GameMove(_move2);
+        joinedGame.move2 = GameMove(_move2);
 
-        LogGameJoined(joinedGame.bet1.player, msg.sender, _gameHash, _move2);
+        LogGameJoined(player1, msg.sender, _gameHash, _move2);
 
         return true;
     }
@@ -98,14 +97,14 @@ contract RockPaperScissors {
         require(!isGameOver(_gameHash));
         
         Game storage revealedGame = games[_gameHash];
-        address player1 = revealedGame.bet1.player;
-        address player2 = revealedGame.bet2.player;
+        address player1 = revealedGame.player1;
+        address player2 = revealedGame.player2;
 
         require(msg.sender == player1);
-        require(revealedGame.bet1.move == GameMove.VOID && revealedGame.bet2.move != GameMove.VOID);
-        require(revealedGame.bet1.moveHash == hash(msg.sender, _move1, _secret1));
+        require(revealedGame.move1 == GameMove.VOID && revealedGame.move2 != GameMove.VOID);
+        require(revealedGame.move1Hash == hash(msg.sender, _move1, _secret1));
 
-        revealedGame.bet1.move = GameMove(_move1);
+        revealedGame.move1 = GameMove(_move1);
 
         winnerId = chooseWinner(revealedGame);
         assignReward(revealedGame, winnerId);
@@ -121,12 +120,15 @@ contract RockPaperScissors {
         require(timeoutExpired(_gameHash));
         
         Game storage claimedGame = games[_gameHash];
+        address player1 = claimedGame.player1;
+        address player2 = claimedGame.player2;
+        require(player1 != 0 && player2 != 0);
 
         winnerId = chooseWinner(claimedGame);
         assignReward(claimedGame, winnerId);
         reset(claimedGame, winnerId);
 
-        LogGameClaimed(claimedGame.bet1.player, claimedGame.bet2.player, _gameHash, winnerId);
+        LogGameClaimed(player1, player2, _gameHash, winnerId);
 
         return winnerId;
     }
@@ -144,27 +146,23 @@ contract RockPaperScissors {
     }
 
     function gamePlayer1(bytes32 gameHash) public constant returns(address player1) {
-        return games[gameHash].bet1.player;
+        return games[gameHash].player1;
     }
 
     function gameMoveHash1(bytes32 gameHash) public constant returns(bytes32 moveHash1) {
-        return games[gameHash].bet1.moveHash;
+        return games[gameHash].move1Hash;
     }
 
     function gameMove1(bytes32 gameHash) public constant returns(GameMove move1) {
-        return games[gameHash].bet1.move;
+        return games[gameHash].move1;
     }
 
     function gamePlayer2(bytes32 gameHash) public constant returns(address player2) {
-        return games[gameHash].bet2.player;
-    }
-
-    function gameMoveHash2(bytes32 gameHash) public constant returns(bytes32 moveHash2) {
-        return games[gameHash].bet2.moveHash;
+        return games[gameHash].player2;
     }
 
     function gameMove2(bytes32 gameHash) public constant returns(GameMove move2) {
-        return games[gameHash].bet2.move;
+        return games[gameHash].move2;
     }
 
     function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {
@@ -173,7 +171,7 @@ contract RockPaperScissors {
 
     function bothMovesRevealed(bytes32 _gameHash) public constant returns(bool movesRevealed) {
         Game memory game = games[_gameHash];
-        return game.bet1.move != GameMove.VOID && game.bet2.move != GameMove.VOID;
+        return game.move1 != GameMove.VOID && game.move2 != GameMove.VOID;
     }
 
     function timeoutExpired(bytes32 _gameHash) public constant returns(bool timedOut) {
@@ -197,13 +195,9 @@ contract RockPaperScissors {
         msg.sender.transfer(amount);
     }
 
-    function () public payable {
-        revert();
-    }
-
     function chooseWinner(Game revealedGame) private constant returns(uint256 winnerIndex) {
-        GameMove move1 = revealedGame.bet1.move;
-        GameMove move2 = revealedGame.bet2.move;
+        GameMove move1 = revealedGame.move1;
+        GameMove move2 = revealedGame.move2;
         if (move1 == move2) return 0;
         if (move1 == GameMove.VOID) return 2;
         if (move2 == GameMove.VOID) return 1;
@@ -213,8 +207,8 @@ contract RockPaperScissors {
     }
 
     function assignReward(Game revealedGame, uint256 winnerId) private {
-        address player1 = revealedGame.bet1.player;
-        address player2 = revealedGame.bet2.player;
+        address player1 = revealedGame.player1;
+        address player2 = revealedGame.player2;
 
         if (winnerId == 1) {
             balances[player1] += revealedGame.price * 2;
@@ -232,12 +226,11 @@ contract RockPaperScissors {
         revealedGame.price = 0;
         revealedGame.startBlock = 0;
         revealedGame.timeoutBlocks = 0;
-        revealedGame.bet1.player = 0;
-        revealedGame.bet1.moveHash = 0x0;
-        revealedGame.bet1.move = GameMove.VOID;
-        revealedGame.bet2.player = 0;
-        revealedGame.bet2.moveHash = 0x0;
-        revealedGame.bet2.move = GameMove.VOID;
+        revealedGame.player1 = 0;
+        revealedGame.move1Hash = 0x0;
+        revealedGame.move1 = GameMove.VOID;
+        revealedGame.player2 = 0;
+        revealedGame.move2 = GameMove.VOID;
         revealedGame.winnerId = winnerId;
     }
 }
