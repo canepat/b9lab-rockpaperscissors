@@ -6,7 +6,7 @@ contract RockPaperScissors {
         address indexed player2,
         bytes32 indexed gameHash,
         uint256 gamePrice,
-        uint256 gameTimeoutBlocks
+        uint256 gameEndBlock
     );
     event LogGameJoined(
         address indexed player1,
@@ -33,45 +33,50 @@ contract RockPaperScissors {
 
     struct Game {
         uint256 price;
-        uint256 startBlock;
-        uint256 timeoutBlocks;
+        uint256 endBlock;
         address player1;
         bytes32 move1Hash;
         GameMove move1;
         address player2;
         GameMove move2;
-        uint256 winnerId;
     }
 
     mapping(bytes32 => Game) private games;
 
     mapping(address => uint256) public balances;
 
-    function startGame(bytes32 _move1Hash, address _player2, uint256 _gamePrice, uint256 _gameTimeoutBlocks)
-    public payable returns (bytes32 gameHash)
-    {
-        require(_move1Hash != 0);
-        require(_player2 != 0);
-        require(_gamePrice != 0);
-        require(_gameTimeoutBlocks != 0);
-        require(msg.value == _gamePrice);
-
-        gameHash = keccak256(msg.sender, _player2);
-        Game storage newGame = games[gameHash];
-        require(newGame.player1 == 0 && newGame.player2 == 0);
-
-        newGame.price = _gamePrice;
-        newGame.startBlock = block.number;
-        newGame.timeoutBlocks = _gameTimeoutBlocks;
-        newGame.player1 = msg.sender;
-        newGame.move1Hash = _move1Hash;
-        newGame.player2 = _player2;
-        newGame.winnerId = 0;
-
-        LogGameCreated(msg.sender, _player2, gameHash, _gamePrice, _gameTimeoutBlocks);
+    function gameHash(address _player2) public constant returns(bytes32 gameHash) {
+        return keccak256(block.number, msg.sender, _player2);
     }
 
-    function joinGame(bytes32 _gameHash, uint8 _move2) public payable returns (bool joined) {
+    function startGame(bytes32 _gameHash, bytes32 _move1Hash, address _player2, uint256 _gameTimeoutBlocks)
+    public payable returns (bool started)
+    {
+        require(_gameHash != 0);
+        require(_move1Hash != 0);
+        require(_player2 != 0);
+        require(_gameTimeoutBlocks != 0);
+        require(msg.value != 0);
+
+        Game storage newGame = games[_gameHash];
+        require(newGame.player1 == 0 && newGame.player2 == 0);
+
+        uint256 endBlock = block.number + _gameTimeoutBlocks;
+
+        newGame.price = msg.value;
+        newGame.endBlock = endBlock;
+        newGame.player1 = msg.sender;
+        newGame.move1Hash = _move1Hash;
+        //newGame.move1 = GameMove.VOID; // already 0 either by default or by delete
+        newGame.player2 = _player2;
+        //newGame.move2 = GameMove.VOID; // already 0 either by default or by delete
+
+        LogGameCreated(msg.sender, _player2, _gameHash, msg.value, endBlock);
+
+        return true;
+    }
+
+    function joinGame(bytes32 _gameHash, uint8 _move2) public payable returns(bool joined) {
         require(_gameHash != 0);
         require(GameMove(_move2) != GameMove.VOID);
         require(!isGameOver(_gameHash));
@@ -108,7 +113,7 @@ contract RockPaperScissors {
 
         winnerId = chooseWinner(revealedGame);
         assignReward(revealedGame, winnerId);
-        reset(revealedGame, winnerId);
+        reset(revealedGame);
 
         LogGameRevealed(player1, player2, _gameHash, _move1, winnerId);
 
@@ -126,47 +131,22 @@ contract RockPaperScissors {
 
         winnerId = chooseWinner(claimedGame);
         assignReward(claimedGame, winnerId);
-        reset(claimedGame, winnerId);
+        reset(claimedGame);
 
         LogGameClaimed(player1, player2, _gameHash, winnerId);
 
         return winnerId;
     }
 
-    function gamePrice(bytes32 gameHash) public constant returns(uint256 price) {
-        return games[gameHash].price;
-    }
-
-    function gameStartBlock(bytes32 gameHash) public constant returns(uint256 startBlock) {
-        return games[gameHash].startBlock;
-    }
-
-    function gameTimeoutBlocks(bytes32 gameHash) public constant returns(uint256 timeoutBlocks) {
-        return games[gameHash].timeoutBlocks;
-    }
-
-    function gamePlayer1(bytes32 gameHash) public constant returns(address player1) {
-        return games[gameHash].player1;
-    }
-
-    function gameMoveHash1(bytes32 gameHash) public constant returns(bytes32 moveHash1) {
-        return games[gameHash].move1Hash;
-    }
-
-    function gameMove1(bytes32 gameHash) public constant returns(GameMove move1) {
-        return games[gameHash].move1;
-    }
-
-    function gamePlayer2(bytes32 gameHash) public constant returns(address player2) {
-        return games[gameHash].player2;
-    }
-
-    function gameMove2(bytes32 gameHash) public constant returns(GameMove move2) {
-        return games[gameHash].move2;
+    function game(bytes32 gameHash) public constant
+    returns(uint256 price, uint256 endBlock, address player1, bytes32 move1Hash, GameMove move1, address player2, GameMove move2)
+    {
+        Game memory g = games[gameHash];
+        return (g.price, g.endBlock, g.player1, g.move1Hash, g.move1, g.player2, g.move2);
     }
 
     function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {
-        return keccak256(sender, move, secret);
+        return keccak256(this, sender, move, secret);
     }
 
     function bothMovesRevealed(bytes32 _gameHash) public constant returns(bool movesRevealed) {
@@ -175,8 +155,7 @@ contract RockPaperScissors {
     }
 
     function timeoutExpired(bytes32 _gameHash) public constant returns(bool timedOut) {
-        Game memory game = games[_gameHash];
-        return block.number > game.startBlock + game.timeoutBlocks;
+        return block.number > games[_gameHash].endBlock;
     }
 
     function isGameOver(bytes32 _gameHash) public constant returns(bool gameOver) {
@@ -195,7 +174,7 @@ contract RockPaperScissors {
         msg.sender.transfer(amount);
     }
 
-    function chooseWinner(Game revealedGame) private constant returns(uint256 winnerIndex) {
+    function chooseWinner(Game storage revealedGame) private constant returns(uint256 winnerIndex) {
         GameMove move1 = revealedGame.move1;
         GameMove move2 = revealedGame.move2;
         if (move1 == move2) return 0;
@@ -206,31 +185,28 @@ contract RockPaperScissors {
         return (move1 > move2) ? 1 : 2;
     }
 
-    function assignReward(Game revealedGame, uint256 winnerId) private {
+    function assignReward(Game storage revealedGame, uint256 winnerId) private {
         address player1 = revealedGame.player1;
         address player2 = revealedGame.player2;
+        uint256 price = revealedGame.price;
 
         if (winnerId == 1) {
-            balances[player1] += revealedGame.price * 2;
+            balances[player1] += price * 2;
         }
         else if (winnerId == 2) {
-            balances[player2] += revealedGame.price * 2;
+            balances[player2] += price * 2;
         }
         else {
-            if (player1 != 0) balances[player1] += revealedGame.price;
-            if (player2 != 0) balances[player2] += revealedGame.price;
+            if (player1 != 0) balances[player1] += price;
+            if (player2 != 0) balances[player2] += price;
         }
     }
 
-    function reset(Game storage revealedGame, uint256 winnerId) private {
-        revealedGame.price = 0;
-        revealedGame.startBlock = 0;
-        revealedGame.timeoutBlocks = 0;
-        revealedGame.player1 = 0;
-        revealedGame.move1Hash = 0x0;
-        revealedGame.move1 = GameMove.VOID;
-        revealedGame.player2 = 0;
-        revealedGame.move2 = GameMove.VOID;
-        revealedGame.winnerId = winnerId;
+    function reset(Game storage selectedGame) private {
+        selectedGame.player1 = 0;
+        selectedGame.move1Hash = 0x0;
+        selectedGame.move1 = GameMove.VOID;
+        selectedGame.player2 = 0;
+        selectedGame.move2 = GameMove.VOID;
     }
 }
