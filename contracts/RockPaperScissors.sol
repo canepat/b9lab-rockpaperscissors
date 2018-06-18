@@ -1,4 +1,4 @@
-pragma solidity ^0.4.13;
+pragma solidity ^0.4.24;
 
 contract RockPaperScissors {
     event LogGameCreated(
@@ -45,8 +45,8 @@ contract RockPaperScissors {
 
     mapping(address => uint256) public balances;
 
-    function gameHash(address _player2) public constant returns(bytes32 gameHash) {
-        return keccak256(block.number, msg.sender, _player2);
+    function gameHash(address _player2) public view returns(bytes32 hash) {
+        return keccak256(abi.encodePacked(block.number, msg.sender, _player2));
     }
 
     function startGame(bytes32 _gameHash, bytes32 _move1Hash, address _player2, uint256 _gameTimeoutBlocks)
@@ -71,7 +71,7 @@ contract RockPaperScissors {
         newGame.player2 = _player2;
         //newGame.move2 = GameMove.VOID; // already 0 either by default or by delete
 
-        LogGameCreated(msg.sender, _player2, _gameHash, msg.value, endBlock);
+        emit LogGameCreated(msg.sender, _player2, _gameHash, msg.value, endBlock);
 
         return true;
     }
@@ -91,7 +91,7 @@ contract RockPaperScissors {
 
         joinedGame.move2 = GameMove(_move2);
 
-        LogGameJoined(player1, msg.sender, _gameHash, _move2);
+        emit LogGameJoined(player1, msg.sender, _gameHash, _move2);
 
         return true;
     }
@@ -115,7 +115,7 @@ contract RockPaperScissors {
         assignReward(revealedGame, winnerId);
         reset(revealedGame);
 
-        LogGameRevealed(player1, player2, _gameHash, _move1, winnerId);
+        emit LogGameRevealed(player1, player2, _gameHash, _move1, winnerId);
 
         return winnerId;
     }
@@ -133,32 +133,32 @@ contract RockPaperScissors {
         assignReward(claimedGame, winnerId);
         reset(claimedGame);
 
-        LogGameClaimed(player1, player2, _gameHash, winnerId);
+        emit LogGameClaimed(player1, player2, _gameHash, winnerId);
 
         return winnerId;
     }
 
-    function game(bytes32 gameHash) public constant
+    function game(bytes32 _gameHash) public view
     returns(uint256 price, uint256 endBlock, address player1, bytes32 move1Hash, GameMove move1, address player2, GameMove move2)
     {
-        Game memory g = games[gameHash];
+        Game memory g = games[_gameHash];
         return (g.price, g.endBlock, g.player1, g.move1Hash, g.move1, g.player2, g.move2);
     }
 
-    function hash(address sender, uint8 move, bytes32 secret) public constant returns(bytes32 secretHash) {
-        return keccak256(this, sender, move, secret);
+    function hash(address sender, uint8 move, bytes32 secret) public view returns(bytes32 secretHash) {
+        return keccak256(abi.encodePacked(this, sender, move, secret));
     }
 
-    function bothMovesRevealed(bytes32 _gameHash) public constant returns(bool movesRevealed) {
-        Game memory game = games[_gameHash];
-        return game.move1 != GameMove.VOID && game.move2 != GameMove.VOID;
+    function bothMovesRevealed(bytes32 _gameHash) public view returns(bool movesRevealed) {
+        Game memory g = games[_gameHash];
+        return g.move1 != GameMove.VOID && g.move2 != GameMove.VOID;
     }
 
-    function timeoutExpired(bytes32 _gameHash) public constant returns(bool timedOut) {
+    function timeoutExpired(bytes32 _gameHash) public view returns(bool timedOut) {
         return block.number > games[_gameHash].endBlock;
     }
 
-    function isGameOver(bytes32 _gameHash) public constant returns(bool gameOver) {
+    function isGameOver(bytes32 _gameHash) public view returns(bool gameOver) {
         return bothMovesRevealed(_gameHash) || timeoutExpired(_gameHash);
     }
 
@@ -169,12 +169,12 @@ contract RockPaperScissors {
 
         balances[msg.sender] = 0;
         
-        LogWithdraw(msg.sender, amount);
+        emit LogWithdraw(msg.sender, amount);
 
         msg.sender.transfer(amount);
     }
 
-    function chooseWinner(Game storage revealedGame) private constant returns(uint256 winnerIndex) {
+    function chooseWinner(Game storage revealedGame) private view returns(uint256 winnerIndex) {
         GameMove move1 = revealedGame.move1;
         GameMove move2 = revealedGame.move2;
         if (move1 == move2) return 0;

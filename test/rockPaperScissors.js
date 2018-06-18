@@ -31,11 +31,12 @@ const RockPaperScissors = artifacts.require("./RockPaperScissors.sol");
 const rockPaperScissorsTestSets = require("./rockPaperScissorsTestSets.js");
 
 contract('RockPaperScissors', function(accounts) {
-    const MAX_GAS = 4000000;
-    const TESTRPC_SLOW_DURATION = 10000;
-    const GETH_SLOW_DURATION = 120000;
-    const GAME_PRICE = web3.toBigNumber(web3.toWei(0.009, 'ether'));
-    const GAME_TIMEOUT = 8;
+    const MAX_GAS               = 4000000;
+    const TESTRPC_SLOW_DURATION = 20000;
+    const GETH_SLOW_DURATION    = 120000;
+    
+    const GAME_PRICE     = web3.toBigNumber(web3.toWei(0.009, 'ether'));
+    const GAME_TIMEOUT   = 8;
     const PLAYER1_SECRET = "secret1";
     const PLAYER2_SECRET = "secret2";
     // Game moves
@@ -197,7 +198,7 @@ contract('RockPaperScissors', function(accounts) {
         it("should initialize game with parameters and default values", function() {
             this.slow(slowDuration);
 
-            let gameHash, move1Hash, block;
+            let gameHash, move1Hash, gameStartBlockNumber;
             return instance.gameHash(player2, { from: player1, gas: MAX_GAS })
                 .then(_gameHash => {
                     gameHash = _gameHash;
@@ -208,16 +209,15 @@ contract('RockPaperScissors', function(accounts) {
                     return instance.startGame(gameHash, move1Hash, player2, GAME_TIMEOUT,
                         { from: player1, gas: MAX_GAS, value: GAME_PRICE });
                 })
-                .then(() => web3.eth.getBlockPromise('latest'))
-                .then(_block => {
-                    block = _block;
+                .then(txObj => {
+                    gameStartBlockNumber = txObj.receipt.blockNumber;
                     return instance.game(gameHash);
                 })
                 .then(game => {
                     assert.strictEqual(game[0].toNumber(), GAME_PRICE.toNumber(),
                         "provided game price not returned");
-                    assert.strictEqual(game[1].toNumber(), block.number + GAME_TIMEOUT,
-                        "game end block is not latest block plus timeout");
+                    assert.strictEqual(game[1].toNumber(), gameStartBlockNumber + GAME_TIMEOUT,
+                        "game end block is not start block plus timeout");
                     assert.strictEqual(game[2], player1, "game player1 not returned");
                     assert.strictEqual(game[3], move1Hash, "game move1Hash not returned");
                     assert.strictEqual(game[4].toNumber(), VOID, "game move1 not VOID");
